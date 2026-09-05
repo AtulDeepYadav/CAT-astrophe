@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH } from '../config/gameConfig';
-import { CAT_LEVELS, GOLDEN_GLOW_TEXTURE, textureKeyForLevel } from '../config/catData';
+import { CAT_LEVELS, GOLDEN_GLOW_TEXTURE, silhouetteTextureKeyForLevel, textureKeyForLevel } from '../config/catData';
+import { WORLD_ZONES, backgroundTextureKeyForZone } from '../config/worldZones';
 
 const GLOW_TEXTURE_SIZE = 160;
 
@@ -26,6 +27,11 @@ export class BootScene extends Phaser.Scene {
 
     for (const cat of CAT_LEVELS) {
       this.load.image(textureKeyForLevel(cat.level), `assets/sprites/cats/cat-${cat.level}.png`);
+      this.load.image(silhouetteTextureKeyForLevel(cat.level), `assets/sprites/cats/cat-${cat.level}-silhouette.png`);
+    }
+
+    for (const zone of WORLD_ZONES) {
+      this.load.image(backgroundTextureKeyForZone(zone.key), `assets/backgrounds/${zone.key}.png`);
     }
   }
 

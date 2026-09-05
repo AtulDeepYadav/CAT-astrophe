@@ -65,5 +65,10 @@ export function textureKeyForLevel(level: number): string {
   return `cat-${level}`;
 }
 
+/** Flat dark silhouette of the same sprite — shown in the Collection Book for undiscovered cats. */
+export function silhouetteTextureKeyForLevel(level: number): string {
+  return `cat-${level}-silhouette`;
+}
+
 /** Soft radial-gradient texture generated once in BootScene, reused behind every Golden Cat. */
 export const GOLDEN_GLOW_TEXTURE = 'golden-glow';

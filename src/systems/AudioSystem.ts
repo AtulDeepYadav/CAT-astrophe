@@ -148,6 +148,56 @@ export class AudioSystem {
     });
   }
 
+  /** Deep, rumbling roar for the Lion cinematic moment — a low sawtooth body with an LFO growl-wobble. */
+  playLionRoar() {
+    const ctx = this.ensureContext();
+    if (!ctx) {
+      return;
+    }
+
+    const now = ctx.currentTime;
+    const duration = 1.3;
+
+    const body = ctx.createOscillator();
+    const bodyGain = ctx.createGain();
+    body.type = 'sawtooth';
+    body.frequency.setValueAtTime(70, now);
+    body.frequency.linearRampToValueAtTime(110, now + 0.25);
+    body.frequency.linearRampToValueAtTime(55, now + duration);
+    body.connect(bodyGain);
+    bodyGain.connect(ctx.destination);
+    bodyGain.gain.setValueAtTime(0.0001, now);
+    bodyGain.gain.exponentialRampToValueAtTime(0.35, now + 0.15);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    // A slow LFO wobbling the body's own frequency is what reads as a "growl" texture.
+    const lfo = ctx.createOscillator();
+    const lfoGain = ctx.createGain();
+    lfo.frequency.setValueAtTime(14, now);
+    lfoGain.gain.setValueAtTime(10, now);
+    lfo.connect(lfoGain);
+    lfoGain.connect(body.frequency);
+
+    const growl = ctx.createOscillator();
+    const growlGain = ctx.createGain();
+    growl.type = 'sawtooth';
+    growl.frequency.setValueAtTime(180, now);
+    growl.frequency.linearRampToValueAtTime(140, now + duration);
+    growl.connect(growlGain);
+    growlGain.connect(ctx.destination);
+    growlGain.gain.setValueAtTime(0.0001, now);
+    growlGain.gain.exponentialRampToValueAtTime(0.15, now + 0.2);
+    growlGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    const stopAt = now + duration + 0.05;
+    body.start(now);
+    body.stop(stopAt);
+    lfo.start(now);
+    lfo.stop(stopAt);
+    growl.start(now);
+    growl.stop(stopAt);
+  }
+
   private ensureContext(): AudioContext | null {
     if (this.ctx) {
       return this.ctx;

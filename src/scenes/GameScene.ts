@@ -15,7 +15,17 @@ import {
   PANEL_TOP,
   WALL_THICKNESS,
 } from '../config/gameConfig';
-import { GOLDEN_GLOW_TEXTURE, getCatData, pickWeightedSpawnLevel, textureKeyForLevel } from '../config/catData';
+import {
+  CAT_LEVELS,
+  GOLDEN_GLOW_TEXTURE,
+  MAX_CAT_LEVEL,
+  getCatData,
+  pickWeightedSpawnLevel,
+  silhouetteTextureKeyForLevel,
+  textureKeyForLevel,
+} from '../config/catData';
+import type { WorldZoneKey } from '../config/worldZones';
+import { backgroundTextureKeyForZone, zoneForLevel } from '../config/worldZones';
 import { Cat } from '../entities/Cat';
 import { registerMergeSystem } from '../systems/MergeSystem';
 import { DangerLineSystem } from '../systems/DangerLineSystem';
@@ -24,6 +34,7 @@ import { ComboSystem, comboLabel } from '../systems/ComboSystem';
 import { PurrMeterSystem } from '../systems/PurrMeterSystem';
 import { AudioSystem } from '../systems/AudioSystem';
 import { IdleSystem } from '../systems/IdleSystem';
+import { CollectionSystem } from '../systems/CollectionSystem';
 
 /** Minimum time between drops, so spam-tapping can't stack cats on top of each other instantly. */
 const DROP_COOLDOWN_MS = 350;
@@ -36,6 +47,8 @@ const CLUTCH_SAVE_BONUS = 25;
 /** Danger line color ramps from calm orange to alarm red as progress (0..1) climbs. */
 const DANGER_COLOR_START = 0xffa53d;
 const DANGER_COLOR_END = 0xe0463f;
+/** One-time bonus for the Lion cinematic moment (first-ever Lion). */
+const LION_DISCOVERY_BONUS = 200;
 
 /**
  * Core loop: aim a hovering cat left/right, drop it, merge same-level pairs on contact,
@@ -46,6 +59,14 @@ export class GameScene extends Phaser.Scene {
   private dropLevel = 1;
   private dropIsGolden = false;
   private highestLevelThisRun = 1;
+
+  private worldBackground!: Phaser.GameObjects.Image;
+  private currentZoneKey: WorldZoneKey = 'home';
+
+  private collection = new CollectionSystem();
+  private collectionBookContainer!: Phaser.GameObjects.Container;
+  private collectionCells: { level: number; image: Phaser.GameObjects.Image; name: Phaser.GameObjects.Text }[] = [];
+  private collectionButtonBounds = { x: 0, y: 0, radius: 22 };
 
   private dropPreviewImage!: Phaser.GameObjects.Image;
   private dropPreviewGlow!: Phaser.GameObjects.Image;
@@ -89,11 +110,15 @@ export class GameScene extends Phaser.Scene {
     this.combo = new ComboSystem();
     this.purrMeter = new PurrMeterSystem();
     this.highestLevelThisRun = 1;
+    this.currentZoneKey = zoneForLevel(1).key;
     this.isGameOver = false;
     this.canDrop = true;
     this.suppressNextDrop = false;
     this.hasPlayedDangerWarning = false;
     this.hasShakenThisDanger = false;
+    // Kitten is never a merge *result* (only ever dropped), so it would otherwise sit permanently
+    // "undiscovered" despite being the first cat every player sees — count it as known from the start.
+    this.collection.discover(1);
 
     // Inner play-area rect (CONTAINER_LEFT..CONTAINER_RIGHT, CONTAINER_TOP..CONTAINER_FLOOR) with
     // invisible walls of WALL_THICKNESS built inward from the panel's gray arena section (drawn in
@@ -111,6 +136,15 @@ export class GameScene extends Phaser.Scene {
       false,
       true,
     );
+
+    // World backdrop — drawn first (and pinned behind everything) so it sits under the header,
+    // the panel, and the arena's semi-transparent fill. Swaps as `highestLevelThisRun` crosses
+    // into a new zone (see updateWorldBackground); baked to exactly GAME_WIDTH x GAME_HEIGHT so
+    // it needs no scaling.
+    this.worldBackground = this.add
+      .image(0, 0, backgroundTextureKeyForZone(this.currentZoneKey))
+      .setOrigin(0, 0)
+      .setDepth(-100);
 
     this.buildHeaderText();
     this.buildPanel();
@@ -174,6 +208,7 @@ export class GameScene extends Phaser.Scene {
     this.updateDropPreviewPosition(this.dropPreviewX);
 
     this.gameOverContainer = this.buildGameOverOverlay();
+    this.collectionBookContainer = this.buildCollectionBookOverlay();
 
     registerMergeSystem(this.matter.world, {
       onMerge: ({ newLevel, x, y, isGolden }) => {
@@ -185,12 +220,21 @@ export class GameScene extends Phaser.Scene {
         this.audio.playMergeTone(newLevel);
         this.showMergeBurst(x, y, isGolden);
         this.highestLevelThisRun = Math.max(this.highestLevelThisRun, newLevel);
+        this.updateWorldBackground(this.highestLevelThisRun);
 
         this.purrMeter.addProgress();
         this.refreshPurrBar();
 
         if (combo >= 2) {
           this.showComboPopup(combo, x, y);
+        }
+
+        if (this.collection.discover(newLevel)) {
+          if (newLevel === MAX_CAT_LEVEL) {
+            this.showLionCinematic();
+          } else {
+            this.showDiscoveryBanner(newLevel);
+          }
         }
       },
     });
@@ -223,6 +267,18 @@ export class GameScene extends Phaser.Scene {
 
       this.audio.unlock(); // must happen from a real user gesture; harmless to call every tap
 
+      if (this.collectionBookContainer.visible) {
+        this.closeCollectionBook();
+        this.suppressNextDrop = true;
+        return;
+      }
+
+      if (this.isPointOnCollectionButton(pointer.x, pointer.y)) {
+        this.openCollectionBook();
+        this.suppressNextDrop = true;
+        return;
+      }
+
       if (this.purrMeter.isReady && this.isPointOnPurrBar(pointer.x, pointer.y)) {
         this.activateYarnBall();
         this.suppressNextDrop = true;
@@ -234,14 +290,14 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (this.isGameOver || this.suppressNextDrop) {
+      if (this.isGameOver || this.suppressNextDrop || this.collectionBookContainer.visible) {
         return;
       }
       this.updateDropPreviewPosition(pointer.x);
     });
 
     this.input.on('pointerup', () => {
-      if (this.isGameOver) {
+      if (this.isGameOver || this.collectionBookContainer.visible) {
         return;
       }
       if (this.suppressNextDrop) {
@@ -258,29 +314,67 @@ export class GameScene extends Phaser.Scene {
    * so this stays minimal until a real logo/identity replaces it.
    */
   private buildHeaderText() {
+    // A white stroke keeps this legible over every zone backdrop, from a bright cosy room to a
+    // dark forest to an orange sunset — a plain fill alone only worked against the old flat pink.
     this.add
       .text(GAME_WIDTH / 2, HEADER_TEXT_HEIGHT / 2, '🐱 Cat Kingdom', {
         fontFamily: 'sans-serif',
         fontSize: '26px',
         color: '#3a2b22',
         fontStyle: 'bold',
+        stroke: '#fdf6ec',
+        strokeThickness: 5,
+      })
+      .setOrigin(0.5);
+
+    // Collection Book button, top-right of the header.
+    this.collectionButtonBounds = { x: GAME_WIDTH - 30, y: HEADER_TEXT_HEIGHT / 2, radius: 24 };
+    this.add
+      .text(this.collectionButtonBounds.x, this.collectionButtonBounds.y, '📖', {
+        fontSize: '24px',
+        stroke: '#fdf6ec',
+        strokeThickness: 4,
       })
       .setOrigin(0.5);
   }
 
-  /** The bordered panel from the sketch: a yellow score section on top of a gray arena section. */
+  /**
+   * The bordered panel from the sketch: a yellow score section on top of a translucent arena
+   * section. The arena fill is a soft tint rather than opaque gray so the world backdrop shows
+   * through behind the falling cats — the "glass tank" look from the background reference.
+   */
   private buildPanel() {
     const graphics = this.add.graphics();
 
     graphics.fillStyle(0xffc93c, 1);
     graphics.fillRect(PANEL_LEFT, PANEL_TOP, PANEL_RIGHT - PANEL_LEFT, PANEL_DIVIDER_Y - PANEL_TOP);
 
-    graphics.fillStyle(0xc9c9c9, 1);
+    graphics.fillStyle(0xf5efe4, 0.62);
     graphics.fillRect(PANEL_LEFT, PANEL_DIVIDER_Y, PANEL_RIGHT - PANEL_LEFT, PANEL_BOTTOM - PANEL_DIVIDER_Y);
 
     graphics.lineStyle(4, 0x1a1410, 1);
     graphics.strokeRect(PANEL_LEFT, PANEL_TOP, PANEL_RIGHT - PANEL_LEFT, PANEL_BOTTOM - PANEL_TOP);
     graphics.lineBetween(PANEL_LEFT, PANEL_DIVIDER_Y, PANEL_RIGHT, PANEL_DIVIDER_Y);
+  }
+
+  /** Crossfades the world backdrop when `level` puts the player in a new zone (see worldZones.ts). */
+  private updateWorldBackground(level: number) {
+    const zone = zoneForLevel(level);
+    if (zone.key === this.currentZoneKey) {
+      return;
+    }
+    this.currentZoneKey = zone.key;
+
+    this.tweens.add({
+      targets: this.worldBackground,
+      alpha: 0,
+      duration: 260,
+      ease: 'Sine.easeIn',
+      onComplete: () => {
+        this.worldBackground.setTexture(backgroundTextureKeyForZone(zone.key));
+        this.tweens.add({ targets: this.worldBackground, alpha: 1, duration: 420, ease: 'Sine.easeOut' });
+      },
+    });
   }
 
   update(_time: number, delta: number) {
@@ -394,6 +488,215 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
+  private isPointOnCollectionButton(x: number, y: number): boolean {
+    const { x: bx, y: by, radius } = this.collectionButtonBounds;
+    return Phaser.Math.Distance.Between(x, y, bx, by) <= radius;
+  }
+
+  /** The Collection Book: a grid of all 10 cats, silhouetted until first discovered (see CollectionSystem). */
+  private buildCollectionBookOverlay(): Phaser.GameObjects.Container {
+    const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1410, 0.97).setOrigin(0, 0);
+
+    const title = this.add
+      .text(GAME_WIDTH / 2, 56, '📖 Cat Collection', {
+        fontFamily: 'sans-serif',
+        fontSize: '24px',
+        color: '#fdf6ec',
+        fontStyle: 'bold',
+      })
+      .setOrigin(0.5);
+
+    const children: Phaser.GameObjects.GameObject[] = [overlayBg, title];
+    const colX = [GAME_WIDTH * 0.27, GAME_WIDTH * 0.73];
+    const gridTop = 120;
+    const rowHeight = 145;
+    const cellImageHeight = 62;
+
+    this.collectionCells = [];
+    for (const cat of CAT_LEVELS) {
+      const row = Math.floor((cat.level - 1) / 2);
+      const col = (cat.level - 1) % 2;
+      const x = colX[col];
+      const y = gridTop + row * rowHeight;
+
+      const image = this.add.image(x, y, silhouetteTextureKeyForLevel(cat.level));
+      const name = this.add
+        .text(x, y + cellImageHeight * 0.7, '???', {
+          fontFamily: 'sans-serif',
+          fontSize: '14px',
+          color: '#fdf6ec',
+        })
+        .setOrigin(0.5);
+
+      this.collectionCells.push({ level: cat.level, image, name });
+      children.push(image, name);
+    }
+
+    const closeHint = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 40, 'Tap anywhere to close', {
+        fontFamily: 'sans-serif',
+        fontSize: '15px',
+        color: '#c9bdae',
+      })
+      .setOrigin(0.5);
+    children.push(closeHint);
+
+    const container = this.add.container(0, 0, children);
+    container.setDepth(1050);
+    container.setVisible(false);
+    return container;
+  }
+
+  /** Refreshes every cell against the current discovery set, then shows the book. */
+  private openCollectionBook() {
+    for (const cell of this.collectionCells) {
+      const discovered = this.collection.isDiscovered(cell.level);
+      const height = 62;
+
+      cell.image.setTexture(discovered ? textureKeyForLevel(cell.level) : silhouetteTextureKeyForLevel(cell.level));
+      cell.image.setScale(height / cell.image.height);
+      cell.name.setText(discovered ? getCatData(cell.level).name : '???');
+    }
+    this.collectionBookContainer.setVisible(true);
+  }
+
+  private closeCollectionBook() {
+    this.collectionBookContainer.setVisible(false);
+  }
+
+  /**
+   * Celebrates discovering a cat for the first time ever (Lion gets its own bigger moment).
+   * Fixed at a prominent spot near the top of the arena — not anchored to the merge point, which
+   * can be buried mid-pile and easy to miss — with a solid backing pill and a real hold so it's
+   * actually readable, not just glimpsed.
+   */
+  private showDiscoveryBanner(level: number) {
+    const data = getCatData(level);
+    const width = 260;
+    const height = 58;
+
+    const bg = this.add
+      .rectangle(0, 0, width, height, 0x1a1410, 0.9)
+      .setStrokeStyle(2, 0xffd873, 1);
+    const portrait = this.add.image(-width / 2 + 34, 0, textureKeyForLevel(level));
+    portrait.setScale(44 / portrait.height);
+    const label = this.add
+      .text(-width / 2 + 62, -15, 'NEW CAT DISCOVERED!', {
+        fontFamily: 'sans-serif',
+        fontSize: '11px',
+        color: '#ffd873',
+        fontStyle: 'bold',
+      })
+      .setOrigin(0, 0.5);
+    const name = this.add
+      .text(-width / 2 + 62, 12, data.name, {
+        fontFamily: 'sans-serif',
+        fontSize: '19px',
+        color: '#fdf6ec',
+        fontStyle: 'bold',
+      })
+      .setOrigin(0, 0.5);
+
+    const banner = this.add.container(GAME_WIDTH / 2, CONTAINER_TOP + 74, [bg, portrait, label, name]);
+    banner.setDepth(600);
+    banner.setScale(0.5);
+    banner.setAlpha(0);
+
+    this.tweens.add({
+      targets: banner,
+      scale: 1,
+      alpha: 1,
+      duration: 220,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.time.delayedCall(1300, () => {
+          this.tweens.add({
+            targets: banner,
+            y: banner.y - 30,
+            alpha: 0,
+            duration: 500,
+            ease: 'Cubic.easeOut',
+            onComplete: () => banner.destroy(),
+          });
+        });
+      },
+    });
+  }
+
+  /**
+   * The big moment: the first-ever Lion. Freezes attention on a golden flash, a camera punch,
+   * a roar, and a bonus — per the doc's "THE KING HAS ARRIVED" beat.
+   */
+  private showLionCinematic() {
+    this.audio.playLionRoar();
+    this.score.add(LION_DISCOVERY_BONUS);
+    this.refreshScoreText();
+
+    const darken = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0).setOrigin(0, 0).setDepth(900);
+    const glow = this.add
+      .image(GAME_WIDTH / 2, GAME_HEIGHT / 2, GOLDEN_GLOW_TEXTURE)
+      .setDepth(901)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setTint(0xffd873)
+      .setAlpha(0);
+    glow.setDisplaySize(GAME_WIDTH * 2.5, GAME_WIDTH * 2.5);
+
+    const title = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2, '👑 THE KING HAS ARRIVED 👑', {
+        fontFamily: 'sans-serif',
+        fontSize: '22px',
+        color: '#ffd873',
+        fontStyle: 'bold',
+        align: 'center',
+        stroke: '#3a2b22',
+        strokeThickness: 5,
+        wordWrap: { width: GAME_WIDTH - 60 },
+      })
+      .setOrigin(0.5)
+      .setDepth(902)
+      .setAlpha(0)
+      .setScale(0.5);
+
+    this.cameras.main.shake(400, 0.01);
+    this.tweens.add({ targets: darken, alpha: 0.4, duration: 220, yoyo: true, hold: 250 });
+    this.tweens.add({ targets: glow, alpha: 0.85, duration: 320, yoyo: true, hold: 200 });
+
+    const zoomInDuration = 450;
+    this.time.delayedCall(180, () => {
+      this.cameras.main.zoomTo(1.12, zoomInDuration, 'Sine.easeOut');
+    });
+    // Scheduled by fixed delay rather than a zoomTo completion callback — that callback fires
+    // repeatedly with a `progress` value that can skip past exactly 1 between ticks, which left
+    // the camera permanently zoomed in when the follow-up zoom-back never triggered.
+    //
+    // `force: true` matters here too: this fires at the exact millisecond the first zoom is due
+    // to finish, and Phaser's zoomTo silently no-ops if it thinks a zoom is still `isRunning` —
+    // which it can still believe for one frame at that exact boundary depending on update order.
+    // Without force, that race intermittently left the camera stuck zoomed in forever.
+    this.time.delayedCall(180 + zoomInDuration, () => {
+      this.cameras.main.zoomTo(1, 550, 'Sine.easeInOut', true);
+    });
+
+    this.time.delayedCall(260, () => {
+      title.setAlpha(1);
+      this.tweens.add({ targets: title, scale: 1, duration: 280, ease: 'Back.easeOut' });
+      this.time.delayedCall(1700, () => {
+        this.tweens.add({
+          targets: title,
+          alpha: 0,
+          y: title.y - 30,
+          duration: 500,
+          onComplete: () => title.destroy(),
+        });
+      });
+    });
+
+    this.time.delayedCall(2300, () => {
+      darken.destroy();
+      glow.destroy();
+    });
+  }
+
   /** Yarn Ball: nudges every cat on the board horizontally toward the arena's center column. */
   private activateYarnBall() {
     this.purrMeter.consume();
@@ -434,12 +737,14 @@ export class GameScene extends Phaser.Scene {
         fontSize: '23px',
         color: '#ff6f3c',
         fontStyle: 'bold',
+        stroke: '#3a2b22',
+        strokeThickness: 3,
       })
       .setOrigin(0.5)
       .setDepth(500)
       .setScale(0.4);
 
-    // Punchy scale-in "pop", then the usual rise-and-fade.
+    // Punchy scale-in "pop", a real hold so it can actually be read, then rise-and-fade.
     this.tweens.add({
       targets: text,
       scale: 1,
@@ -451,6 +756,7 @@ export class GameScene extends Phaser.Scene {
           y: y - 50,
           alpha: 0,
           duration: 600,
+          delay: 550,
           ease: 'Cubic.easeOut',
           onComplete: () => text.destroy(),
         });
@@ -514,7 +820,7 @@ export class GameScene extends Phaser.Scene {
           y: text.y - 40,
           alpha: 0,
           duration: 700,
-          delay: 300,
+          delay: 650,
           ease: 'Cubic.easeOut',
           onComplete: () => text.destroy(),
         });
