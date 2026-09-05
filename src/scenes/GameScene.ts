@@ -35,6 +35,9 @@ import { PurrMeterSystem } from '../systems/PurrMeterSystem';
 import { AudioSystem } from '../systems/AudioSystem';
 import { IdleSystem } from '../systems/IdleSystem';
 import { CollectionSystem } from '../systems/CollectionSystem';
+import { StatsSystem } from '../systems/StatsSystem';
+import { ACHIEVEMENTS, AchievementSystem } from '../systems/AchievementSystem';
+import { COSMETIC_OPTIONS, CosmeticsSystem } from '../systems/CosmeticsSystem';
 
 /** Minimum time between drops, so spam-tapping can't stack cats on top of each other instantly. */
 const DROP_COOLDOWN_MS = 350;
@@ -49,6 +52,10 @@ const DANGER_COLOR_START = 0xffa53d;
 const DANGER_COLOR_END = 0xe0463f;
 /** One-time bonus for the Lion cinematic moment (first-ever Lion). */
 const LION_DISCOVERY_BONUS = 200;
+/** Accent color for achievement-unlock banners — distinct from the cat-discovery gold. */
+const ACHIEVEMENT_ACCENT = 0x8ec6ff;
+
+type CollectionBookTab = 'cats' | 'stats' | 'style';
 
 /**
  * Core loop: aim a hovering cat left/right, drop it, merge same-level pairs on contact,
@@ -64,9 +71,21 @@ export class GameScene extends Phaser.Scene {
   private currentZoneKey: WorldZoneKey = 'home';
 
   private collection = new CollectionSystem();
+  // Lifetime meta-progression systems (Phase 4) — never reset in create(), unlike combo/purrMeter.
+  private stats = new StatsSystem();
+  private achievements = new AchievementSystem();
+  private cosmetics = new CosmeticsSystem();
+  private crownText!: Phaser.GameObjects.Text;
+
   private collectionBookContainer!: Phaser.GameObjects.Container;
+  private collectionBookTab: CollectionBookTab = 'cats';
+  private collectionTabButtons: { key: CollectionBookTab; text: Phaser.GameObjects.Text }[] = [];
+  private catsTabContainer!: Phaser.GameObjects.Container;
+  private statsTabContainer!: Phaser.GameObjects.Container;
+  private styleTabContainer!: Phaser.GameObjects.Container;
   private collectionCells: { level: number; image: Phaser.GameObjects.Image; name: Phaser.GameObjects.Text }[] = [];
   private collectionButtonBounds = { x: 0, y: 0, radius: 22 };
+  private cosmeticSwatchBounds: { id: string; x: number; y: number; radius: number }[] = [];
 
   private dropPreviewImage!: Phaser.GameObjects.Image;
   private dropPreviewGlow!: Phaser.GameObjects.Image;
@@ -119,6 +138,7 @@ export class GameScene extends Phaser.Scene {
     // Kitten is never a merge *result* (only ever dropped), so it would otherwise sit permanently
     // "undiscovered" despite being the first cat every player sees — count it as known from the start.
     this.collection.discover(1);
+    this.stats.recordGameStarted();
 
     // Inner play-area rect (CONTAINER_LEFT..CONTAINER_RIGHT, CONTAINER_TOP..CONTAINER_FLOOR) with
     // invisible walls of WALL_THICKNESS built inward from the panel's gray arena section (drawn in
@@ -189,7 +209,7 @@ export class GameScene extends Phaser.Scene {
     this.aimGuide = this.add.graphics();
     this.dropPreviewGlow = this.add.image(0, 0, GOLDEN_GLOW_TEXTURE);
     this.dropPreviewGlow.setBlendMode(Phaser.BlendModes.ADD);
-    this.dropPreviewGlow.setTint(0xffd873);
+    this.dropPreviewGlow.setTint(this.cosmetics.getSelectedColor());
     this.dropPreviewGlow.setVisible(false);
     this.tweens.add({
       targets: this.dropPreviewGlow,
@@ -225,8 +245,29 @@ export class GameScene extends Phaser.Scene {
         this.purrMeter.addProgress();
         this.refreshPurrBar();
 
+        this.stats.recordMerge();
+        this.tryUnlockAchievement('first_merge');
+        if (isGolden) {
+          this.tryUnlockAchievement('first_golden');
+        }
+        if (this.stats.get().totalCatsMerged >= 100) {
+          this.tryUnlockAchievement('merged_100');
+        }
+
         if (combo >= 2) {
           this.showComboPopup(combo, x, y);
+        }
+        this.stats.recordCombo(combo);
+        if (combo >= 5) {
+          this.tryUnlockAchievement('combo_5');
+        }
+
+        if (newLevel === MAX_CAT_LEVEL) {
+          this.stats.recordLion();
+          this.refreshCrownText();
+          // Silent: the Lion cinematic below is already the celebration for this moment —
+          // a second banner popping up mid-cinematic would just be visual clutter.
+          this.tryUnlockAchievement('first_lion', { silent: true });
         }
 
         if (this.collection.discover(newLevel)) {
@@ -268,6 +309,20 @@ export class GameScene extends Phaser.Scene {
       this.audio.unlock(); // must happen from a real user gesture; harmless to call every tap
 
       if (this.collectionBookContainer.visible) {
+        const tabHit = this.hitTestCollectionTab(pointer.x, pointer.y);
+        if (tabHit) {
+          this.setCollectionBookTab(tabHit);
+          this.suppressNextDrop = true;
+          return;
+        }
+        if (this.collectionBookTab === 'style') {
+          const swatchHit = this.hitTestCosmeticSwatch(pointer.x, pointer.y);
+          if (swatchHit) {
+            this.selectCosmetic(swatchHit);
+            this.suppressNextDrop = true;
+            return;
+          }
+        }
         this.closeCollectionBook();
         this.suppressNextDrop = true;
         return;
@@ -327,6 +382,19 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    // Crown count, top-left of the header — symmetric with the Collection Book button, +1 per
+    // Lion ever created (lifetime, via StatsSystem), tapping into the Collection Book's Stats tab.
+    this.crownText = this.add
+      .text(30, HEADER_TEXT_HEIGHT / 2, `👑 ${this.stats.get().lionsCreated}`, {
+        fontFamily: 'sans-serif',
+        fontSize: '18px',
+        color: '#3a2b22',
+        fontStyle: 'bold',
+        stroke: '#fdf6ec',
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5);
+
     // Collection Book button, top-right of the header.
     this.collectionButtonBounds = { x: GAME_WIDTH - 30, y: HEADER_TEXT_HEIGHT / 2, radius: 24 };
     this.add
@@ -336,6 +404,10 @@ export class GameScene extends Phaser.Scene {
         strokeThickness: 4,
       })
       .setOrigin(0.5);
+  }
+
+  private refreshCrownText() {
+    this.crownText.setText(`👑 ${this.stats.get().lionsCreated}`);
   }
 
   /**
@@ -349,7 +421,7 @@ export class GameScene extends Phaser.Scene {
     graphics.fillStyle(0xffc93c, 1);
     graphics.fillRect(PANEL_LEFT, PANEL_TOP, PANEL_RIGHT - PANEL_LEFT, PANEL_DIVIDER_Y - PANEL_TOP);
 
-    graphics.fillStyle(0xf5efe4, 0.62);
+    graphics.fillStyle(0xf5efe4, 0.82);
     graphics.fillRect(PANEL_LEFT, PANEL_DIVIDER_Y, PANEL_RIGHT - PANEL_LEFT, PANEL_BOTTOM - PANEL_DIVIDER_Y);
 
     graphics.lineStyle(4, 0x1a1410, 1);
@@ -364,6 +436,9 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     this.currentZoneKey = zone.key;
+    if (zone.key === 'savannah') {
+      this.tryUnlockAchievement('reach_savannah');
+    }
 
     this.tweens.add({
       targets: this.worldBackground,
@@ -403,6 +478,7 @@ export class GameScene extends Phaser.Scene {
     this.dropPreviewImage.setScale((radius * 2) / this.dropPreviewImage.height);
     this.dropPreviewGlow.setVisible(this.dropIsGolden);
     this.dropPreviewGlow.setDisplaySize(radius * 3.2, radius * 3.2);
+    this.dropPreviewGlow.setTint(this.cosmetics.getSelectedColor());
   }
 
   /** Moves the hovering preview (+ its glow + aim guide) to a clamped x, following the pointer. */
@@ -432,7 +508,14 @@ export class GameScene extends Phaser.Scene {
     const isGolden = this.dropIsGolden;
     const radius = getCatData(level).radius;
 
-    new Cat(this.matter.world, this.dropPreviewX, CONTAINER_TOP + radius + 4, level, isGolden);
+    new Cat(
+      this.matter.world,
+      this.dropPreviewX,
+      CONTAINER_TOP + radius + 4,
+      level,
+      isGolden,
+      this.cosmetics.getSelectedColor(),
+    );
 
     const rolled = this.rollLevel();
     this.dropLevel = rolled.level;
@@ -493,25 +576,74 @@ export class GameScene extends Phaser.Scene {
     return Phaser.Math.Distance.Between(x, y, bx, by) <= radius;
   }
 
-  /** The Collection Book: a grid of all 10 cats, silhouetted until first discovered (see CollectionSystem). */
+  /**
+   * The Collection Book: a tabbed overlay — Cats (grid, silhouetted until first discovered),
+   * Stats (lifetime totals + achievement checklist), and Style (golden-glow color picker, gated
+   * behind Crown count). Screen space is too tight on a phone to show all three at once.
+   */
   private buildCollectionBookOverlay(): Phaser.GameObjects.Container {
     const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1410, 0.97).setOrigin(0, 0);
 
     const title = this.add
-      .text(GAME_WIDTH / 2, 56, '📖 Cat Collection', {
+      .text(GAME_WIDTH / 2, 40, '📖 Cat Kingdom', {
         fontFamily: 'sans-serif',
-        fontSize: '24px',
+        fontSize: '20px',
         color: '#fdf6ec',
         fontStyle: 'bold',
       })
       .setOrigin(0.5);
 
-    const children: Phaser.GameObjects.GameObject[] = [overlayBg, title];
-    const colX = [GAME_WIDTH * 0.27, GAME_WIDTH * 0.73];
-    const gridTop = 120;
-    const rowHeight = 145;
-    const cellImageHeight = 62;
+    const tabDefs: { key: CollectionBookTab; label: string }[] = [
+      { key: 'cats', label: '🐱 Cats' },
+      { key: 'stats', label: '📊 Stats' },
+      { key: 'style', label: '✨ Style' },
+    ];
+    const tabX = [GAME_WIDTH * 0.2, GAME_WIDTH * 0.5, GAME_WIDTH * 0.8];
+    this.collectionTabButtons = tabDefs.map((def, i) => ({
+      key: def.key,
+      text: this.add
+        .text(tabX[i], 74, def.label, {
+          fontFamily: 'sans-serif',
+          fontSize: '15px',
+          color: '#c9bdae',
+          fontStyle: 'bold',
+        })
+        .setOrigin(0.5),
+    }));
 
+    this.catsTabContainer = this.buildCatsTab();
+    this.statsTabContainer = this.buildStatsTab();
+    this.styleTabContainer = this.buildStyleTab();
+
+    const closeHint = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 24, 'Tap anywhere else to close', {
+        fontFamily: 'sans-serif',
+        fontSize: '14px',
+        color: '#c9bdae',
+      })
+      .setOrigin(0.5);
+
+    const container = this.add.container(0, 0, [
+      overlayBg,
+      title,
+      ...this.collectionTabButtons.map((t) => t.text),
+      this.catsTabContainer,
+      this.statsTabContainer,
+      this.styleTabContainer,
+      closeHint,
+    ]);
+    container.setDepth(1050);
+    container.setVisible(false);
+    return container;
+  }
+
+  private buildCatsTab(): Phaser.GameObjects.Container {
+    const colX = [GAME_WIDTH * 0.27, GAME_WIDTH * 0.73];
+    const gridTop = 130;
+    const rowHeight = 138;
+    const cellImageHeight = 58;
+
+    const children: Phaser.GameObjects.GameObject[] = [];
     this.collectionCells = [];
     for (const cat of CAT_LEVELS) {
       const row = Math.floor((cat.level - 1) / 2);
@@ -532,36 +664,197 @@ export class GameScene extends Phaser.Scene {
       children.push(image, name);
     }
 
-    const closeHint = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 40, 'Tap anywhere to close', {
+    return this.add.container(0, 0, children);
+  }
+
+  /** Lifetime totals up top, then a scrollable-free checklist of every achievement (locked ones dimmed, name/desc still shown). */
+  private buildStatsTab(): Phaser.GameObjects.Container {
+    const summary = this.add.text(GAME_WIDTH / 2, 108, '', {
+      fontFamily: 'sans-serif',
+      fontSize: '13px',
+      color: '#fdf6ec',
+      align: 'center',
+      lineSpacing: 4,
+    });
+    summary.setOrigin(0.5, 0);
+    summary.setName('statsSummary');
+
+    const children: Phaser.GameObjects.GameObject[] = [summary];
+    const rowTop = 200;
+    const rowHeight = 56;
+
+    for (let i = 0; i < ACHIEVEMENTS.length; i++) {
+      const achievement = ACHIEVEMENTS[i];
+      const y = rowTop + i * rowHeight;
+
+      const icon = this.add.text(36, y, achievement.icon, { fontSize: '22px' }).setOrigin(0.5);
+      const name = this.add
+        .text(62, y - 11, achievement.name, {
+          fontFamily: 'sans-serif',
+          fontSize: '15px',
+          color: '#fdf6ec',
+          fontStyle: 'bold',
+        })
+        .setOrigin(0, 0.5);
+      const desc = this.add
+        .text(62, y + 11, achievement.description, {
+          fontFamily: 'sans-serif',
+          fontSize: '12px',
+          color: '#c9bdae',
+        })
+        .setOrigin(0, 0.5);
+
+      icon.setName(`ach-icon-${achievement.id}`);
+      name.setName(`ach-name-${achievement.id}`);
+      desc.setName(`ach-desc-${achievement.id}`);
+      children.push(icon, name, desc);
+    }
+
+    return this.add.container(0, 0, children);
+  }
+
+  /** Golden-glow color swatches, gated behind lifetime Crown count — tap an unlocked one to select it. */
+  private buildStyleTab(): Phaser.GameObjects.Container {
+    const intro = this.add
+      .text(GAME_WIDTH / 2, 100, 'Pick your Golden Cat glow color', {
         fontFamily: 'sans-serif',
-        fontSize: '15px',
+        fontSize: '14px',
         color: '#c9bdae',
       })
       .setOrigin(0.5);
-    children.push(closeHint);
 
-    const container = this.add.container(0, 0, children);
-    container.setDepth(1050);
-    container.setVisible(false);
-    return container;
+    const children: Phaser.GameObjects.GameObject[] = [intro];
+    const rowTop = 150;
+    const rowHeight = 68;
+    this.cosmeticSwatchBounds = [];
+
+    for (let i = 0; i < COSMETIC_OPTIONS.length; i++) {
+      const option = COSMETIC_OPTIONS[i];
+      const y = rowTop + i * rowHeight;
+      const cx = 56;
+
+      const circle = this.add.circle(cx, y, 22, option.color, 1).setStrokeStyle(2, 0xfdf6ec, 0.4);
+      const name = this.add
+        .text(cx + 40, y - 11, option.name, {
+          fontFamily: 'sans-serif',
+          fontSize: '15px',
+          color: '#fdf6ec',
+          fontStyle: 'bold',
+        })
+        .setOrigin(0, 0.5);
+      const status = this.add
+        .text(cx + 40, y + 11, '', {
+          fontFamily: 'sans-serif',
+          fontSize: '12px',
+          color: '#c9bdae',
+        })
+        .setOrigin(0, 0.5);
+
+      circle.setName(`style-circle-${option.id}`);
+      name.setName(`style-name-${option.id}`);
+      status.setName(`style-status-${option.id}`);
+      this.cosmeticSwatchBounds.push({ id: option.id, x: cx, y, radius: 26 });
+      children.push(circle, name, status);
+    }
+
+    return this.add.container(0, 0, children);
   }
 
-  /** Refreshes every cell against the current discovery set, then shows the book. */
+  /** Refreshes all three tabs against current save data, shows the requested one, then shows the book. */
   private openCollectionBook() {
     for (const cell of this.collectionCells) {
       const discovered = this.collection.isDiscovered(cell.level);
-      const height = 62;
+      const height = 58;
 
       cell.image.setTexture(discovered ? textureKeyForLevel(cell.level) : silhouetteTextureKeyForLevel(cell.level));
       cell.image.setScale(height / cell.image.height);
       cell.name.setText(discovered ? getCatData(cell.level).name : '???');
     }
+
+    const s = this.stats.get();
+    const summary = this.statsTabContainer.getByName('statsSummary') as Phaser.GameObjects.Text | null;
+    summary?.setText(
+      `Games Played: ${s.gamesPlayed}    Cats Merged: ${s.totalCatsMerged}\n` +
+        `Biggest Combo: x${s.biggestCombo}    Lions Crowned: ${s.lionsCreated}`,
+    );
+    for (const achievement of ACHIEVEMENTS) {
+      const unlocked = this.achievements.isUnlocked(achievement.id);
+      const icon = this.statsTabContainer.getByName(`ach-icon-${achievement.id}`) as Phaser.GameObjects.Text | null;
+      const name = this.statsTabContainer.getByName(`ach-name-${achievement.id}`) as Phaser.GameObjects.Text | null;
+      const desc = this.statsTabContainer.getByName(`ach-desc-${achievement.id}`) as Phaser.GameObjects.Text | null;
+      const alpha = unlocked ? 1 : 0.35;
+      icon?.setAlpha(alpha);
+      name?.setAlpha(alpha);
+      desc?.setAlpha(alpha);
+      icon?.setText(unlocked ? achievement.icon : '🔒');
+    }
+
+    const crowns = this.stats.get().lionsCreated;
+    for (const option of COSMETIC_OPTIONS) {
+      const unlocked = this.cosmetics.isUnlocked(option.id, crowns);
+      const selected = this.cosmetics.getSelectedId() === option.id;
+      const circle = this.styleTabContainer.getByName(`style-circle-${option.id}`) as Phaser.GameObjects.Arc | null;
+      const name = this.styleTabContainer.getByName(`style-name-${option.id}`) as Phaser.GameObjects.Text | null;
+      const status = this.styleTabContainer.getByName(`style-status-${option.id}`) as Phaser.GameObjects.Text | null;
+      circle?.setAlpha(unlocked ? 1 : 0.3);
+      circle?.setStrokeStyle(selected ? 3 : 2, selected ? 0xffffff : 0xfdf6ec, selected ? 1 : 0.4);
+      name?.setAlpha(unlocked ? 1 : 0.4);
+      status?.setText(selected ? 'Selected' : unlocked ? 'Tap to select' : `🔒 Needs ${option.unlockCrowns} 👑`);
+    }
+
+    this.setCollectionBookTab('cats');
     this.collectionBookContainer.setVisible(true);
   }
 
   private closeCollectionBook() {
     this.collectionBookContainer.setVisible(false);
+    // The drop preview's golden glow reflects whatever cosmetic is now selected.
+    this.updateDropPreview();
+  }
+
+  private setCollectionBookTab(tab: CollectionBookTab) {
+    this.collectionBookTab = tab;
+    this.catsTabContainer.setVisible(tab === 'cats');
+    this.statsTabContainer.setVisible(tab === 'stats');
+    this.styleTabContainer.setVisible(tab === 'style');
+    for (const button of this.collectionTabButtons) {
+      button.text.setColor(button.key === tab ? '#ffd873' : '#c9bdae');
+    }
+  }
+
+  /** Hit-tests the three tab labels with a generous vertical pad — a text object's own bounds are too tight for a fingertip. */
+  private hitTestCollectionTab(x: number, y: number): CollectionBookTab | null {
+    for (const button of this.collectionTabButtons) {
+      const b = button.text.getBounds();
+      if (x >= b.x - 12 && x <= b.x + b.width + 12 && y >= b.y - 14 && y <= b.y + b.height + 14) {
+        return button.key;
+      }
+    }
+    return null;
+  }
+
+  private hitTestCosmeticSwatch(x: number, y: number): string | null {
+    for (const swatch of this.cosmeticSwatchBounds) {
+      if (Phaser.Math.Distance.Between(x, y, swatch.x, swatch.y) <= swatch.radius) {
+        return swatch.id;
+      }
+    }
+    return null;
+  }
+
+  /** Selects a cosmetic if unlocked, re-rendering the Style tab's selection state in place. */
+  private selectCosmetic(id: string) {
+    const crowns = this.stats.get().lionsCreated;
+    if (!this.cosmetics.select(id, crowns)) {
+      return;
+    }
+    for (const option of COSMETIC_OPTIONS) {
+      const selected = option.id === id;
+      const circle = this.styleTabContainer.getByName(`style-circle-${option.id}`) as Phaser.GameObjects.Arc | null;
+      const status = this.styleTabContainer.getByName(`style-status-${option.id}`) as Phaser.GameObjects.Text | null;
+      circle?.setStrokeStyle(selected ? 3 : 2, selected ? 0xffffff : 0xfdf6ec, selected ? 1 : 0.4);
+      status?.setText(selected ? 'Selected' : this.cosmetics.isUnlocked(option.id, crowns) ? 'Tap to select' : status?.text ?? '');
+    }
   }
 
   /**
@@ -572,32 +865,83 @@ export class GameScene extends Phaser.Scene {
    */
   private showDiscoveryBanner(level: number) {
     const data = getCatData(level);
+    this.showCelebrationBanner({
+      portraitTextureKey: textureKeyForLevel(level),
+      eyebrow: 'NEW CAT DISCOVERED!',
+      title: data.name,
+      accentColor: 0xffd873,
+    });
+  }
+
+  /** Same beat as a cat discovery, but for a milestone achievement — a distinct accent color, an emoji instead of a portrait. */
+  private showAchievementBanner(id: string) {
+    const achievement = ACHIEVEMENTS.find((a) => a.id === id);
+    if (!achievement) {
+      return;
+    }
+    this.showCelebrationBanner({
+      portraitEmoji: achievement.icon,
+      eyebrow: 'ACHIEVEMENT UNLOCKED!',
+      title: achievement.name,
+      accentColor: ACHIEVEMENT_ACCENT,
+    });
+  }
+
+  /** Unlocks an achievement (idempotent) and celebrates it, unless `silent` — used when a bigger moment already owns the spotlight. */
+  private tryUnlockAchievement(id: string, opts: { silent?: boolean } = {}) {
+    if (this.achievements.unlock(id) && !opts.silent) {
+      this.showAchievementBanner(id);
+    }
+  }
+
+  /**
+   * Shared "pop in, hold, rise and fade" banner mechanics used by both cat discoveries and
+   * achievement unlocks — a fixed spot near the top of the arena, readable over any background.
+   */
+  private showCelebrationBanner(opts: {
+    portraitTextureKey?: string;
+    portraitEmoji?: string;
+    eyebrow: string;
+    title: string;
+    accentColor: number;
+    holdMs?: number;
+  }) {
+    const { portraitTextureKey, portraitEmoji, eyebrow, title, accentColor, holdMs = 1300 } = opts;
+    const accentHex = `#${accentColor.toString(16).padStart(6, '0')}`;
     const width = 260;
     const height = 58;
 
-    const bg = this.add
-      .rectangle(0, 0, width, height, 0x1a1410, 0.9)
-      .setStrokeStyle(2, 0xffd873, 1);
-    const portrait = this.add.image(-width / 2 + 34, 0, textureKeyForLevel(level));
-    portrait.setScale(44 / portrait.height);
-    const label = this.add
-      .text(-width / 2 + 62, -15, 'NEW CAT DISCOVERED!', {
-        fontFamily: 'sans-serif',
-        fontSize: '11px',
-        color: '#ffd873',
-        fontStyle: 'bold',
-      })
-      .setOrigin(0, 0.5);
-    const name = this.add
-      .text(-width / 2 + 62, 12, data.name, {
-        fontFamily: 'sans-serif',
-        fontSize: '19px',
-        color: '#fdf6ec',
-        fontStyle: 'bold',
-      })
-      .setOrigin(0, 0.5);
+    const bg = this.add.rectangle(0, 0, width, height, 0x1a1410, 0.9).setStrokeStyle(2, accentColor, 1);
+    const children: Phaser.GameObjects.GameObject[] = [bg];
 
-    const banner = this.add.container(GAME_WIDTH / 2, CONTAINER_TOP + 74, [bg, portrait, label, name]);
+    if (portraitTextureKey) {
+      const portrait = this.add.image(-width / 2 + 34, 0, portraitTextureKey);
+      portrait.setScale(44 / portrait.height);
+      children.push(portrait);
+    } else if (portraitEmoji) {
+      children.push(this.add.text(-width / 2 + 34, 0, portraitEmoji, { fontSize: '30px' }).setOrigin(0.5));
+    }
+
+    children.push(
+      this.add
+        .text(-width / 2 + 62, -15, eyebrow, {
+          fontFamily: 'sans-serif',
+          fontSize: '11px',
+          color: accentHex,
+          fontStyle: 'bold',
+        })
+        .setOrigin(0, 0.5),
+      this.add
+        .text(-width / 2 + 62, 12, title, {
+          fontFamily: 'sans-serif',
+          fontSize: '19px',
+          color: '#fdf6ec',
+          fontStyle: 'bold',
+        })
+        .setOrigin(0, 0.5),
+    );
+
+    const banner = this.add.container(GAME_WIDTH / 2, CONTAINER_TOP + 74, children);
     banner.setDepth(600);
     banner.setScale(0.5);
     banner.setAlpha(0);
@@ -609,7 +953,7 @@ export class GameScene extends Phaser.Scene {
       duration: 220,
       ease: 'Back.easeOut',
       onComplete: () => {
-        this.time.delayedCall(1300, () => {
+        this.time.delayedCall(holdMs, () => {
           this.tweens.add({
             targets: banner,
             y: banner.y - 30,
@@ -797,6 +1141,7 @@ export class GameScene extends Phaser.Scene {
     this.score.add(CLUTCH_SAVE_BONUS);
     this.refreshScoreText();
     this.audio.playClutchSave();
+    this.tryUnlockAchievement('clutch_save');
 
     const text = this.add
       .text(GAME_WIDTH / 2, CONTAINER_TOP + 60, `CLUTCH SAVE! +${CLUTCH_SAVE_BONUS}`, {

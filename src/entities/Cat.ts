@@ -21,7 +21,14 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
   /** Soft gold halo behind a Golden Cat — a separate GameObject synced to this one each frame in preUpdate. */
   private glow: Phaser.GameObjects.Image | null = null;
 
-  constructor(world: Phaser.Physics.Matter.World, x: number, y: number, level: number, isGolden = false) {
+  constructor(
+    world: Phaser.Physics.Matter.World,
+    x: number,
+    y: number,
+    level: number,
+    isGolden = false,
+    goldenTint = GOLDEN_TINT,
+  ) {
     const data = getCatData(level);
     // The circle body is created here via the `shape` option, in the same call that sets
     // restitution/friction/label — calling `setCircle()` again afterward would silently
@@ -59,7 +66,7 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
     if (isGolden) {
       this.glow = this.scene.add.image(x, y, GOLDEN_GLOW_TEXTURE);
       this.glow.setBlendMode(Phaser.BlendModes.ADD);
-      this.glow.setTint(GOLDEN_TINT);
+      this.glow.setTint(goldenTint);
       this.glow.setDisplaySize(this.radius * 3.2, this.radius * 3.2);
       this.glow.setDepth(-1);
       this.glow.setAlpha(0.6);
