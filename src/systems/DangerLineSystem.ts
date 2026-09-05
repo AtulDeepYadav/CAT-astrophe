@@ -8,10 +8,10 @@ const RESTING_SPEED_THRESHOLD = 0.4;
 const DANGER_TIME_LIMIT_MS = 2500;
 
 export interface DangerLineSystemOptions {
-  /** Fires every frame while the countdown is running, with seconds remaining. */
-  onDangerTick: (secondsRemaining: number) => void;
-  /** Fires once when the board drops back below the line before time runs out. */
-  onSafe: () => void;
+  /** Fires every frame while the countdown is running: seconds left, and progress 0 (just entered) -> 1 (out of time). */
+  onDangerTick: (secondsRemaining: number, progress: number) => void;
+  /** Fires once when the board drops back below the line before time runs out, with how long the danger lasted. */
+  onSafe: (dangerDurationMs: number) => void;
   onGameOver: () => void;
 }
 
@@ -51,7 +51,8 @@ export class DangerLineSystem {
       this.dangerElapsedMs += deltaMs;
 
       const remaining = Math.max(0, (DANGER_TIME_LIMIT_MS - this.dangerElapsedMs) / 1000);
-      this.options.onDangerTick(remaining);
+      const progress = Math.min(1, this.dangerElapsedMs / DANGER_TIME_LIMIT_MS);
+      this.options.onDangerTick(remaining, progress);
 
       if (this.dangerElapsedMs >= DANGER_TIME_LIMIT_MS) {
         this.gameOverFired = true;
@@ -59,8 +60,9 @@ export class DangerLineSystem {
       }
     } else if (this.inDanger) {
       this.inDanger = false;
+      const duration = this.dangerElapsedMs;
       this.dangerElapsedMs = 0;
-      this.options.onSafe();
+      this.options.onSafe(duration);
     }
   }
 }

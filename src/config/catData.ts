@@ -41,6 +41,26 @@ export const MAX_CAT_LEVEL = CAT_LEVELS.length;
 /** Levels that can appear as a randomly spawned "next cat" (kept low so the board doesn't fill instantly). */
 export const SPAWNABLE_LEVELS = [1, 2, 3, 4];
 
+/**
+ * Weighted odds per spawnable level (must line up 1:1 with SPAWNABLE_LEVELS) — small cats show up
+ * far more often than big ones, so the player is rarely stuck holding four unmergeable House Cats
+ * in a row. Weights don't need to sum to 100; only their ratios matter.
+ */
+const SPAWN_WEIGHTS = [40, 30, 20, 10];
+
+/** Picks a spawnable level using SPAWN_WEIGHTS instead of a flat uniform chance. */
+export function pickWeightedSpawnLevel(): number {
+  const total = SPAWN_WEIGHTS.reduce((sum, w) => sum + w, 0);
+  let roll = Math.random() * total;
+  for (let i = 0; i < SPAWNABLE_LEVELS.length; i++) {
+    roll -= SPAWN_WEIGHTS[i];
+    if (roll <= 0) {
+      return SPAWNABLE_LEVELS[i];
+    }
+  }
+  return SPAWNABLE_LEVELS[SPAWNABLE_LEVELS.length - 1]; // floating-point safety net
+}
+
 export function textureKeyForLevel(level: number): string {
   return `cat-${level}`;
 }

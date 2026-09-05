@@ -29,3 +29,16 @@ export class ComboSystem {
     }
   }
 }
+
+const COMBO_LABELS: Record<number, string> = {
+  2: 'NICE!',
+  3: 'PURRFECT!',
+  4: 'MEOWGA COMBO!',
+  5: 'ABSOLUTE CAT-OS!',
+};
+const MAX_LABEL = 'KINGDOM COMBO!'; // 6+
+
+/** Escalating on-screen phrase for a given combo count (only meaningful for combo >= 2). */
+export function comboLabel(combo: number): string {
+  return COMBO_LABELS[combo] ?? MAX_LABEL;
+}

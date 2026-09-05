@@ -15,44 +15,58 @@ import {
   PANEL_TOP,
   WALL_THICKNESS,
 } from '../config/gameConfig';
-import { GOLDEN_GLOW_TEXTURE, MAX_CAT_LEVEL, SPAWNABLE_LEVELS, getCatData, textureKeyForLevel } from '../config/catData';
+import { GOLDEN_GLOW_TEXTURE, getCatData, pickWeightedSpawnLevel, textureKeyForLevel } from '../config/catData';
 import { Cat } from '../entities/Cat';
 import { registerMergeSystem } from '../systems/MergeSystem';
 import { DangerLineSystem } from '../systems/DangerLineSystem';
 import { ScoreSystem } from '../systems/ScoreSystem';
-import { ComboSystem } from '../systems/ComboSystem';
+import { ComboSystem, comboLabel } from '../systems/ComboSystem';
 import { PurrMeterSystem } from '../systems/PurrMeterSystem';
 import { AudioSystem } from '../systems/AudioSystem';
 import { IdleSystem } from '../systems/IdleSystem';
 
-/** NEXT preview scales proportionally between these two heights, by the cat's radius (level 1..MAX_CAT_LEVEL). */
-const PREVIEW_MIN_HEIGHT = 22;
-const PREVIEW_MAX_HEIGHT = 44;
 /** Minimum time between drops, so spam-tapping can't stack cats on top of each other instantly. */
 const DROP_COOLDOWN_MS = 350;
-/** Chance the currently-previewed next cat is a rare Golden Cat (doc: ~2-5%, nudged up for MVP visibility). */
+/** Chance a rolled cat is a rare Golden Cat (doc: ~2-5%, nudged up for MVP visibility). */
 const GOLDEN_CAT_CHANCE = 0.08;
 const PURR_BAR_HEIGHT = 8;
+/** A "Clutch Save" only counts (and only pays out) if the danger lasted at least this long — a half-second flicker isn't a save. */
+const CLUTCH_SAVE_MIN_DANGER_MS = 800;
+const CLUTCH_SAVE_BONUS = 25;
+/** Danger line color ramps from calm orange to alarm red as progress (0..1) climbs. */
+const DANGER_COLOR_START = 0xffa53d;
+const DANGER_COLOR_END = 0xe0463f;
 
 /**
- * V1 core loop: drop cats, merge same-level pairs on contact, score the merges,
- * and end the run if a resting cat sits above the danger line too long.
+ * Core loop: aim a hovering cat left/right, drop it, merge same-level pairs on contact,
+ * score the merges, and end the run if a resting cat sits above the danger line too long.
  */
 export class GameScene extends Phaser.Scene {
-  private nextLevel = 1;
-  private nextIsGolden = false;
+  /** The cat currently hovering in the arena, about to be dropped — this IS the "what's next" indicator now. */
+  private dropLevel = 1;
+  private dropIsGolden = false;
   private highestLevelThisRun = 1;
-  private nextPreviewImage!: Phaser.GameObjects.Image;
-  private nextPreviewGlow!: Phaser.GameObjects.Image;
-  private nextPreviewName!: Phaser.GameObjects.Text;
+
+  private dropPreviewImage!: Phaser.GameObjects.Image;
+  private dropPreviewGlow!: Phaser.GameObjects.Image;
+  private aimGuide!: Phaser.GameObjects.Graphics;
+  private dropPreviewX = GAME_WIDTH / 2;
+  /** True while a purr-bar tap is being handled, so the same gesture doesn't also commit a drop. */
+  private suppressNextDrop = false;
+
   private scoreText!: Phaser.GameObjects.Text;
   private bestText!: Phaser.GameObjects.Text;
+  private dangerLineGraphics!: Phaser.GameObjects.Graphics;
   private dangerWarningText!: Phaser.GameObjects.Text;
   private gameOverContainer!: Phaser.GameObjects.Container;
   private finalScoreText!: Phaser.GameObjects.Text;
   private finalCatPortrait!: Phaser.GameObjects.Image;
   private purrBarFill!: Phaser.GameObjects.Rectangle;
   private purrBarY = 0;
+
+  /** Guards against re-triggering the once-per-episode warning sound / screen shake every frame. */
+  private hasPlayedDangerWarning = false;
+  private hasShakenThisDanger = false;
 
   private score = new ScoreSystem();
   private combo = new ComboSystem();
@@ -74,11 +88,12 @@ export class GameScene extends Phaser.Scene {
     // across runs on purpose, these two have nothing worth carrying over).
     this.combo = new ComboSystem();
     this.purrMeter = new PurrMeterSystem();
-    this.nextLevel = 1;
-    this.nextIsGolden = false;
     this.highestLevelThisRun = 1;
     this.isGameOver = false;
     this.canDrop = true;
+    this.suppressNextDrop = false;
+    this.hasPlayedDangerWarning = false;
+    this.hasShakenThisDanger = false;
 
     // Inner play-area rect (CONTAINER_LEFT..CONTAINER_RIGHT, CONTAINER_TOP..CONTAINER_FLOOR) with
     // invisible walls of WALL_THICKNESS built inward from the panel's gray arena section (drawn in
@@ -101,9 +116,8 @@ export class GameScene extends Phaser.Scene {
     this.buildPanel();
 
     // Danger line marker + its "about to lose" countdown text (hidden until triggered).
-    const dangerLineGraphics = this.add.graphics();
-    dangerLineGraphics.lineStyle(2, 0xe0463f, 0.8);
-    dangerLineGraphics.lineBetween(CONTAINER_LEFT, DANGER_LINE_Y, CONTAINER_RIGHT, DANGER_LINE_Y);
+    this.dangerLineGraphics = this.add.graphics();
+    this.drawDangerLine(DANGER_COLOR_START, 0.8);
 
     this.dangerWarningText = this.add
       .text(GAME_WIDTH / 2, DANGER_LINE_Y + 6, '', {
@@ -114,9 +128,10 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5, 0);
 
-    // Stats section of the panel (yellow, per the sketch): Score (left) / Next-cat preview
-    // (center) / Best (right). Padded off the panel's own edges, not the arena's physics edges.
-    const statsTop = PANEL_TOP + 4;
+    // Stats section of the panel (yellow, per the sketch): Score (left) / Best (right), plus the
+    // Purr Meter bar. No next-cat preview here — the hovering drop cat in the arena already
+    // shows exactly what's about to fall, so a second "next" box was redundant.
+    const statsTop = PANEL_TOP + 6;
 
     this.scoreText = this.add.text(PANEL_LEFT + 8, statsTop, 'SCORE\n0', {
       fontFamily: 'sans-serif',
@@ -134,40 +149,29 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(1, 0);
 
-    // "Next cat" preview — a fixed-size box so every level reads at the same size here,
-    // regardless of how big that cat's actual physics body is once dropped.
-    this.add
-      .text(GAME_WIDTH / 2, statsTop, 'NEXT', {
-        fontFamily: 'sans-serif',
-        fontSize: '11px',
-        color: '#6b5644',
-      })
-      .setOrigin(0.5, 0);
+    this.buildPurrBar(statsTop + 32);
 
-    this.nextPreviewGlow = this.add.image(GAME_WIDTH / 2, statsTop + 32, GOLDEN_GLOW_TEXTURE);
-    this.nextPreviewGlow.setBlendMode(Phaser.BlendModes.ADD);
-    this.nextPreviewGlow.setTint(0xffd873);
-    this.nextPreviewGlow.setVisible(false);
+    // The hovering "current drop" cat + its golden glow + a faint aim guide toward the floor.
+    this.aimGuide = this.add.graphics();
+    this.dropPreviewGlow = this.add.image(0, 0, GOLDEN_GLOW_TEXTURE);
+    this.dropPreviewGlow.setBlendMode(Phaser.BlendModes.ADD);
+    this.dropPreviewGlow.setTint(0xffd873);
+    this.dropPreviewGlow.setVisible(false);
     this.tweens.add({
-      targets: this.nextPreviewGlow,
+      targets: this.dropPreviewGlow,
       alpha: 0.5,
       duration: 480,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
     });
+    this.dropPreviewImage = this.add.image(0, 0, textureKeyForLevel(1));
 
-    this.nextPreviewImage = this.add.image(GAME_WIDTH / 2, statsTop + 32, textureKeyForLevel(this.nextLevel));
-    this.nextPreviewName = this.add
-      .text(GAME_WIDTH / 2, statsTop + 54, '', {
-        fontFamily: 'sans-serif',
-        fontSize: '12px',
-        color: '#3a2b22',
-      })
-      .setOrigin(0.5, 0);
-
-    this.buildPurrBar(statsTop + 74);
-    this.updateNextPreview();
+    const rolled = this.rollLevel();
+    this.dropLevel = rolled.level;
+    this.dropIsGolden = rolled.isGolden;
+    this.updateDropPreview();
+    this.updateDropPreviewPosition(this.dropPreviewX);
 
     this.gameOverContainer = this.buildGameOverOverlay();
 
@@ -194,11 +198,20 @@ export class GameScene extends Phaser.Scene {
     this.idleSystem = new IdleSystem(this, this.audio);
 
     this.dangerLine = new DangerLineSystem({
-      onDangerTick: (secondsRemaining) => {
+      onDangerTick: (secondsRemaining, progress) => {
         this.dangerWarningText.setText(`⚠ MEOW MELTDOWN ${secondsRemaining.toFixed(1)}s`);
+        if (!this.hasPlayedDangerWarning) {
+          this.hasPlayedDangerWarning = true;
+          this.audio.playDangerWarning();
+        }
+        this.updateDangerVisuals(progress);
       },
-      onSafe: () => {
+      onSafe: (dangerDurationMs) => {
         this.dangerWarningText.setText('');
+        this.resetDangerVisuals();
+        if (dangerDurationMs >= CLUTCH_SAVE_MIN_DANGER_MS) {
+          this.showClutchSave();
+        }
       },
       onGameOver: () => this.triggerGameOver(),
     });
@@ -212,10 +225,30 @@ export class GameScene extends Phaser.Scene {
 
       if (this.purrMeter.isReady && this.isPointOnPurrBar(pointer.x, pointer.y)) {
         this.activateYarnBall();
+        this.suppressNextDrop = true;
         return;
       }
 
-      this.dropCat(pointer.x);
+      this.suppressNextDrop = false;
+      this.updateDropPreviewPosition(pointer.x);
+    });
+
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (this.isGameOver || this.suppressNextDrop) {
+        return;
+      }
+      this.updateDropPreviewPosition(pointer.x);
+    });
+
+    this.input.on('pointerup', () => {
+      if (this.isGameOver) {
+        return;
+      }
+      if (this.suppressNextDrop) {
+        this.suppressNextDrop = false;
+        return;
+      }
+      this.commitDrop();
     });
   }
 
@@ -259,25 +292,9 @@ export class GameScene extends Phaser.Scene {
     this.idleSystem.update(delta, this.matter.world);
   }
 
-  /** Syncs the preview sprite/name to `nextLevel`/`nextIsGolden`, at a fixed on-screen size. */
-  private updateNextPreview() {
-    this.nextPreviewImage.setTexture(textureKeyForLevel(this.nextLevel));
-
-    // Same idea as Cat.ts: scale by height only (preserving the art's own aspect ratio) so the
-    // preview's SIZE actually reflects the cat's relative size, per the character sheet's own
-    // "same world, bigger meows" progression — a fixed box for every level was hiding that.
-    const radius = getCatData(this.nextLevel).radius;
-    const minRadius = getCatData(1).radius;
-    const maxRadius = getCatData(MAX_CAT_LEVEL).radius;
-    const t = (radius - minRadius) / (maxRadius - minRadius);
-    const targetHeight = PREVIEW_MIN_HEIGHT + t * (PREVIEW_MAX_HEIGHT - PREVIEW_MIN_HEIGHT);
-    this.nextPreviewImage.setScale(targetHeight / this.nextPreviewImage.height);
-
-    this.nextPreviewGlow.setVisible(this.nextIsGolden);
-    this.nextPreviewGlow.setDisplaySize(targetHeight * 1.7, targetHeight * 1.7);
-
-    const name = getCatData(this.nextLevel).name;
-    this.nextPreviewName.setText(this.nextIsGolden ? `✨ ${name}` : name);
+  /** Picks a level via the weighted spawn table plus an independent Golden Cat roll. */
+  private rollLevel(): { level: number; isGolden: boolean } {
+    return { level: pickWeightedSpawnLevel(), isGolden: Math.random() < GOLDEN_CAT_CHANCE };
   }
 
   private refreshScoreText() {
@@ -285,26 +302,49 @@ export class GameScene extends Phaser.Scene {
     this.bestText.setText(`BEST\n${this.score.best}`);
   }
 
-  /** Randomizes the next cat that will be dropped, including the rare Golden Cat roll. */
-  private rollNextCat() {
-    this.nextLevel = SPAWNABLE_LEVELS[Phaser.Math.Between(0, SPAWNABLE_LEVELS.length - 1)];
-    this.nextIsGolden = Math.random() < GOLDEN_CAT_CHANCE;
-    this.updateNextPreview();
+  /** Syncs the hovering arena preview to `dropLevel`/`dropIsGolden` — the cat about to be dropped. */
+  private updateDropPreview() {
+    this.dropPreviewImage.setTexture(textureKeyForLevel(this.dropLevel));
+    const radius = getCatData(this.dropLevel).radius;
+    this.dropPreviewImage.setScale((radius * 2) / this.dropPreviewImage.height);
+    this.dropPreviewGlow.setVisible(this.dropIsGolden);
+    this.dropPreviewGlow.setDisplaySize(radius * 3.2, radius * 3.2);
   }
 
-  private dropCat(x: number) {
+  /** Moves the hovering preview (+ its glow + aim guide) to a clamped x, following the pointer. */
+  private updateDropPreviewPosition(x: number) {
+    const radius = getCatData(this.dropLevel).radius;
+    this.dropPreviewX = Phaser.Math.Clamp(x, CONTAINER_LEFT + radius, CONTAINER_RIGHT - radius);
+    const y = CONTAINER_TOP + radius + 4;
+
+    this.dropPreviewImage.setPosition(this.dropPreviewX, y);
+    this.dropPreviewGlow.setPosition(this.dropPreviewX, y);
+
+    // Short and faint rather than a full-height line down to the floor — just enough to read as
+    // an aim hint without dominating the board.
+    this.aimGuide.clear();
+    this.aimGuide.lineStyle(1, 0x3a2b22, 0.12);
+    const guideBottom = Math.min(CONTAINER_FLOOR, y + radius + 90);
+    this.aimGuide.lineBetween(this.dropPreviewX, y + radius, this.dropPreviewX, guideBottom);
+  }
+
+  /** Drops the currently-hovering cat at its aimed position, then rolls a fresh one to hover next. */
+  private commitDrop() {
     if (!this.canDrop) {
       return;
     }
 
-    const level = this.nextLevel;
-    const isGolden = this.nextIsGolden;
-    this.rollNextCat();
-
+    const level = this.dropLevel;
+    const isGolden = this.dropIsGolden;
     const radius = getCatData(level).radius;
-    const clampedX = Phaser.Math.Clamp(x, CONTAINER_LEFT + radius, CONTAINER_RIGHT - radius);
 
-    new Cat(this.matter.world, clampedX, CONTAINER_TOP + radius + 4, level, isGolden);
+    new Cat(this.matter.world, this.dropPreviewX, CONTAINER_TOP + radius + 4, level, isGolden);
+
+    const rolled = this.rollLevel();
+    this.dropLevel = rolled.level;
+    this.dropIsGolden = rolled.isGolden;
+    this.updateDropPreview();
+    this.updateDropPreviewPosition(this.dropPreviewX);
 
     this.canDrop = false;
     this.time.delayedCall(DROP_COOLDOWN_MS, () => {
@@ -345,8 +385,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private isPointOnPurrBar(x: number, y: number): boolean {
+    // Padded well past the bar's drawn 8px height — a real fingertip needs a ~40px+ target, not a hairline.
     return (
-      x >= PANEL_LEFT + 8 && x <= PANEL_RIGHT - 8 && y >= this.purrBarY - 6 && y <= this.purrBarY + PURR_BAR_HEIGHT + 6
+      x >= PANEL_LEFT + 8 &&
+      x <= PANEL_RIGHT - 8 &&
+      y >= this.purrBarY - 16 &&
+      y <= this.purrBarY + PURR_BAR_HEIGHT + 16
     );
   }
 
@@ -385,7 +429,7 @@ export class GameScene extends Phaser.Scene {
 
   private showComboPopup(combo: number, x: number, y: number) {
     const text = this.add
-      .text(x, y - 10, `COMBO x${combo}`, {
+      .text(x, y - 10, comboLabel(combo), {
         fontFamily: 'sans-serif',
         fontSize: '18px',
         color: '#ff6f3c',
@@ -407,6 +451,70 @@ export class GameScene extends Phaser.Scene {
           y: y - 50,
           alpha: 0,
           duration: 600,
+          ease: 'Cubic.easeOut',
+          onComplete: () => text.destroy(),
+        });
+      },
+    });
+  }
+
+  private drawDangerLine(color: number, alpha: number) {
+    this.dangerLineGraphics.clear();
+    this.dangerLineGraphics.lineStyle(2, color, alpha);
+    this.dangerLineGraphics.lineBetween(CONTAINER_LEFT, DANGER_LINE_Y, CONTAINER_RIGHT, DANGER_LINE_Y);
+  }
+
+  /** Escalates the danger line's color toward alarm-red and shakes the screen once past the halfway point. */
+  private updateDangerVisuals(progress: number) {
+    const color = Phaser.Display.Color.Interpolate.ColorWithColor(
+      Phaser.Display.Color.ValueToColor(DANGER_COLOR_START),
+      Phaser.Display.Color.ValueToColor(DANGER_COLOR_END),
+      100,
+      Math.round(progress * 100),
+    );
+    this.drawDangerLine(Phaser.Display.Color.GetColor(color.r, color.g, color.b), 0.8 + progress * 0.2);
+
+    if (progress > 0.5 && !this.hasShakenThisDanger) {
+      this.hasShakenThisDanger = true;
+      this.cameras.main.shake(150, 0.006);
+    }
+  }
+
+  private resetDangerVisuals() {
+    this.drawDangerLine(DANGER_COLOR_START, 0.8);
+    this.hasPlayedDangerWarning = false;
+    this.hasShakenThisDanger = false;
+  }
+
+  /** Rewards surviving a real scare — the board clearing the danger line after a meaningful close call. */
+  private showClutchSave() {
+    this.score.add(CLUTCH_SAVE_BONUS);
+    this.refreshScoreText();
+    this.audio.playClutchSave();
+
+    const text = this.add
+      .text(GAME_WIDTH / 2, CONTAINER_TOP + 60, `CLUTCH SAVE! +${CLUTCH_SAVE_BONUS}`, {
+        fontFamily: 'sans-serif',
+        fontSize: '20px',
+        color: '#2ecc71',
+        fontStyle: 'bold',
+      })
+      .setOrigin(0.5)
+      .setDepth(500)
+      .setScale(0.4);
+
+    this.tweens.add({
+      targets: text,
+      scale: 1,
+      duration: 180,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.tweens.add({
+          targets: text,
+          y: text.y - 40,
+          alpha: 0,
+          duration: 700,
+          delay: 300,
           ease: 'Cubic.easeOut',
           onComplete: () => text.destroy(),
         });

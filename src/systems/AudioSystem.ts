@@ -93,6 +93,61 @@ export class AudioSystem {
     osc.stop(now + 0.25);
   }
 
+  /** Urgent two-note "meow-meow" alarm — played once when a cat first crosses the danger line. */
+  playDangerWarning() {
+    const ctx = this.ensureContext();
+    if (!ctx) {
+      return;
+    }
+
+    const now = ctx.currentTime;
+    [0, 0.14].forEach((delay) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      const start = now + delay;
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(520, start);
+      osc.frequency.exponentialRampToValueAtTime(380, start + 0.1);
+
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.12);
+
+      osc.start(start);
+      osc.stop(start + 0.14);
+    });
+  }
+
+  /** Bright relief chime for a "Clutch Save" — the board clearing the danger line just in time. */
+  playClutchSave() {
+    const ctx = this.ensureContext();
+    if (!ctx) {
+      return;
+    }
+
+    const now = ctx.currentTime;
+    [0, 0.09, 0.18].forEach((delay, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      const start = now + delay;
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(440 + i * 140, start);
+
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.2, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.18);
+
+      osc.start(start);
+      osc.stop(start + 0.2);
+    });
+  }
+
   private ensureContext(): AudioContext | null {
     if (this.ctx) {
       return this.ctx;
