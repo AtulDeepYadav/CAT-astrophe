@@ -1141,7 +1141,11 @@ export class GameScene extends Phaser.Scene {
     this.score.add(CLUTCH_SAVE_BONUS);
     this.refreshScoreText();
     this.audio.playClutchSave();
-    this.tryUnlockAchievement('clutch_save');
+    // Delayed rather than fired immediately: the achievement banner renders at nearly the same
+    // spot as the "CLUTCH SAVE!" popup below, and both showing at once (only possible the very
+    // first time this fires) rendered as garbled overlapping text. Staggering them lets the
+    // popup rise and fade out of the way first.
+    this.time.delayedCall(1000, () => this.tryUnlockAchievement('clutch_save'));
 
     const text = this.add
       .text(GAME_WIDTH / 2, CONTAINER_TOP + 60, `CLUTCH SAVE! +${CLUTCH_SAVE_BONUS}`, {
