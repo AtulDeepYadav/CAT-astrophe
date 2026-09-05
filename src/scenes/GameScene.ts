@@ -29,7 +29,7 @@ import { IdleSystem } from '../systems/IdleSystem';
 const DROP_COOLDOWN_MS = 350;
 /** Chance a rolled cat is a rare Golden Cat (doc: ~2-5%, nudged up for MVP visibility). */
 const GOLDEN_CAT_CHANCE = 0.08;
-const PURR_BAR_HEIGHT = 8;
+const PURR_BAR_HEIGHT = 11;
 /** A "Clutch Save" only counts (and only pays out) if the danger lasted at least this long — a half-second flicker isn't a save. */
 const CLUTCH_SAVE_MIN_DANGER_MS = 800;
 const CLUTCH_SAVE_BONUS = 25;
@@ -120,9 +120,9 @@ export class GameScene extends Phaser.Scene {
     this.drawDangerLine(DANGER_COLOR_START, 0.8);
 
     this.dangerWarningText = this.add
-      .text(GAME_WIDTH / 2, DANGER_LINE_Y + 6, '', {
+      .text(GAME_WIDTH / 2, DANGER_LINE_Y + 8, '', {
         fontFamily: 'sans-serif',
-        fontSize: '13px',
+        fontSize: '16px',
         color: '#e0463f',
         fontStyle: 'bold',
       })
@@ -131,25 +131,25 @@ export class GameScene extends Phaser.Scene {
     // Stats section of the panel (yellow, per the sketch): Score (left) / Best (right), plus the
     // Purr Meter bar. No next-cat preview here — the hovering drop cat in the arena already
     // shows exactly what's about to fall, so a second "next" box was redundant.
-    const statsTop = PANEL_TOP + 6;
+    const statsTop = PANEL_TOP + 8;
 
-    this.scoreText = this.add.text(PANEL_LEFT + 8, statsTop, 'SCORE\n0', {
+    this.scoreText = this.add.text(PANEL_LEFT + 10, statsTop, 'SCORE\n0', {
       fontFamily: 'sans-serif',
-      fontSize: '12px',
+      fontSize: '16px',
       color: '#3a2b22',
       align: 'left',
     });
 
     this.bestText = this.add
-      .text(PANEL_RIGHT - 8, statsTop, `BEST\n${this.score.best}`, {
+      .text(PANEL_RIGHT - 10, statsTop, `BEST\n${this.score.best}`, {
         fontFamily: 'sans-serif',
-        fontSize: '12px',
+        fontSize: '16px',
         color: '#3a2b22',
         align: 'right',
       })
       .setOrigin(1, 0);
 
-    this.buildPurrBar(statsTop + 32);
+    this.buildPurrBar(statsTop + 40);
 
     // The hovering "current drop" cat + its golden glow + a faint aim guide toward the floor.
     this.aimGuide = this.add.graphics();
@@ -261,7 +261,7 @@ export class GameScene extends Phaser.Scene {
     this.add
       .text(GAME_WIDTH / 2, HEADER_TEXT_HEIGHT / 2, '🐱 Cat Kingdom', {
         fontFamily: 'sans-serif',
-        fontSize: '20px',
+        fontSize: '26px',
         color: '#3a2b22',
         fontStyle: 'bold',
       })
@@ -431,7 +431,7 @@ export class GameScene extends Phaser.Scene {
     const text = this.add
       .text(x, y - 10, comboLabel(combo), {
         fontFamily: 'sans-serif',
-        fontSize: '18px',
+        fontSize: '23px',
         color: '#ff6f3c',
         fontStyle: 'bold',
       })
@@ -495,7 +495,7 @@ export class GameScene extends Phaser.Scene {
     const text = this.add
       .text(GAME_WIDTH / 2, CONTAINER_TOP + 60, `CLUTCH SAVE! +${CLUTCH_SAVE_BONUS}`, {
         fontFamily: 'sans-serif',
-        fontSize: '20px',
+        fontSize: '25px',
         color: '#2ecc71',
         fontStyle: 'bold',
       })
@@ -526,30 +526,30 @@ export class GameScene extends Phaser.Scene {
     const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.6).setOrigin(0, 0);
 
     const title = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 110, 'CAT-ASTROPHE!', {
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 130, 'CAT-ASTROPHE!', {
         fontFamily: 'sans-serif',
-        fontSize: '24px',
+        fontSize: '30px',
         color: '#ffffff',
         fontStyle: 'bold',
       })
       .setOrigin(0.5);
 
-    this.finalCatPortrait = this.add.image(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 40, textureKeyForLevel(1));
-    this.finalCatPortrait.setDisplaySize(56, 56);
+    this.finalCatPortrait = this.add.image(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 50, textureKeyForLevel(1));
+    this.finalCatPortrait.setDisplaySize(76, 76);
 
     this.finalScoreText = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 45, '', {
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 50, '', {
         fontFamily: 'sans-serif',
-        fontSize: '16px',
+        fontSize: '20px',
         color: '#ffffff',
         align: 'center',
       })
       .setOrigin(0.5);
 
     const restartHint = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 95, 'Tap to try again', {
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 115, 'Tap to try again', {
         fontFamily: 'sans-serif',
-        fontSize: '14px',
+        fontSize: '18px',
         color: '#f7ecd9',
       })
       .setOrigin(0.5);

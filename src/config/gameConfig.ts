@@ -1,10 +1,11 @@
 /**
- * Portrait canvas sized to match real phone viewports (~0.47 width:height, close to a 390x844-class
- * screen) rather than an arbitrary squat rectangle — Phaser Scale.FIT letterboxes on other aspect
- * ratios, and the closer this is to an actual phone's ratio, the less letterboxing shows up there.
+ * Portrait canvas at ~0.51 width:height — real phones range roughly 0.46 (tall flagships) to 0.56
+ * (an iPhone SE), so this sits in the middle to minimize letterboxing across that whole range
+ * rather than razor-matching one extreme. Font/UI sizes are tuned against GAME_WIDTH, so they read
+ * fine regardless of this value — this number only trades off arena length vs. letterbox amount.
  */
 export const GAME_WIDTH = 440;
-export const GAME_HEIGHT = 940;
+export const GAME_HEIGHT = 870;
 
 /**
  * Layout, per the sketch: a bordered panel (score bar + arena) floats inset inside a full-canvas
@@ -13,7 +14,7 @@ export const GAME_HEIGHT = 940;
  * HEADER_TEXT_HEIGHT is the backdrop space above it reserved for a logo/title.
  */
 export const FRAME_MARGIN = 20;
-export const HEADER_TEXT_HEIGHT = 56;
+export const HEADER_TEXT_HEIGHT = 64;
 
 export const PANEL_LEFT = FRAME_MARGIN;
 export const PANEL_RIGHT = GAME_WIDTH - FRAME_MARGIN;
@@ -21,7 +22,7 @@ export const PANEL_TOP = HEADER_TEXT_HEIGHT;
 export const PANEL_BOTTOM = GAME_HEIGHT - FRAME_MARGIN;
 
 /** Score/Best + Purr Meter section at the top of the panel — no next-cat preview needed anymore, the hovering drop cat in the arena already shows what's coming. */
-export const STATS_BAR_HEIGHT = 52;
+export const STATS_BAR_HEIGHT = 60;
 /** Where the panel's score section ends and the arena section begins. */
 export const PANEL_DIVIDER_Y = PANEL_TOP + STATS_BAR_HEIGHT;
 
