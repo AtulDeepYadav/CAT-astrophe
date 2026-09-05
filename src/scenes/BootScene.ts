@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME_HEIGHT, GAME_WIDTH } from '../config/gameConfig';
+import { FONT_FAMILY, GAME_HEIGHT, GAME_WIDTH } from '../config/gameConfig';
 import { CAT_LEVELS, GOLDEN_GLOW_TEXTURE, silhouetteTextureKeyForLevel, textureKeyForLevel } from '../config/catData';
 import { WORLD_ZONES, backgroundTextureKeyForZone } from '../config/worldZones';
 import { animFrameTextureKey, framesForLevel } from '../config/catAnimations';
@@ -43,11 +43,26 @@ export class BootScene extends Phaser.Scene {
     }
   }
 
-  create() {
+  async create() {
     this.loadingBarBg.destroy();
     this.loadingBarFill.destroy();
     this.buildGoldenGlowTexture();
+    // Phaser bakes Text objects to a texture at creation time — starting the Game scene before
+    // the webfont resolves would freeze every label onto the system fallback font permanently,
+    // not just for one frame. Race against a timeout so a slow/unavailable font API can never
+    // block the game from starting at all.
+    await Promise.race([this.waitForFont(), new Promise((resolve) => this.time.delayedCall(2500, resolve))]);
     this.scene.start('Game');
+  }
+
+  private async waitForFont() {
+    try {
+      await document.fonts.load('700 32px "Baloo 2"');
+      await document.fonts.ready;
+    } catch {
+      // Web Font Loading API can be unavailable/unreliable in some contexts (older browsers,
+      // privacy modes) — fall through and start with whatever font already resolved.
+    }
   }
 
   /** A soft white radial gradient, tinted gold and additively blended wherever it's used (see Cat.ts). */
@@ -73,7 +88,7 @@ export class BootScene extends Phaser.Scene {
   private buildLoadingBar() {
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 30, 'Loading the Kingdom...', {
-        fontFamily: 'sans-serif',
+        fontFamily: FONT_FAMILY,
         fontSize: '14px',
         color: '#3a2b22',
       })

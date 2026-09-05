@@ -121,6 +121,10 @@ def connected_components(mask):
 
 
 LABEL_FRACTION = 0.18
+# Tabby's row1 band is unusually short and its "Paw Up"-style poses sit closer to the label
+# pill than other sheets — the default fraction cropped off a chunk of the cat's own lower body.
+# The real gap there was hand-verified at ~99.5% of the band instead.
+LABEL_FRACTION_OVERRIDE = {2: 0.005}
 
 
 # The Lion's golden mane sits too close in color to its own warm cream+paw-print
@@ -170,7 +174,7 @@ def process(level, filename):
             raise RuntimeError(f'level {level}: no substantial band after hero: {bands}')
         row1_band = min(later, key=lambda b: b[0])
         y0, y1_full = row1_band
-        y1 = y0 + round((y1_full - y0) * (1 - LABEL_FRACTION))
+        y1 = y0 + round((y1_full - y0) * (1 - LABEL_FRACTION_OVERRIDE.get(level, LABEL_FRACTION)))
 
         mask = detect_alpha[y0:y1, :] > 10
         comps = [c for c in connected_components(mask) if c[0] > 200]

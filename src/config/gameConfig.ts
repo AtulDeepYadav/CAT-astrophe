@@ -40,3 +40,11 @@ export const MATTER_CONFIG = {
   gravity: { x: 0, y: 1 },
   debug: false,
 };
+
+/**
+ * Rounded, playful display face (loaded via Google Fonts in index.html) in place of the generic
+ * system sans-serif every text object used before — matches the game's illustrated-character art
+ * a lot better. "Comic Sans MS" sits as an intermediate fallback (still playful/rounded) in case
+ * the webfont hasn't finished loading somehow; BootScene waits on it before building any UI text.
+ */
+export const FONT_FAMILY = '"Baloo 2", "Comic Sans MS", sans-serif';

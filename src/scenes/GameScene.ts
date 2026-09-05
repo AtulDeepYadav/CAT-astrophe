@@ -5,6 +5,7 @@ import {
   CONTAINER_RIGHT,
   CONTAINER_TOP,
   DANGER_LINE_Y,
+  FONT_FAMILY,
   GAME_HEIGHT,
   GAME_WIDTH,
   HEADER_TEXT_HEIGHT,
@@ -94,8 +95,8 @@ export class GameScene extends Phaser.Scene {
   /** True while a purr-bar tap is being handled, so the same gesture doesn't also commit a drop. */
   private suppressNextDrop = false;
 
-  private scoreText!: Phaser.GameObjects.Text;
-  private bestText!: Phaser.GameObjects.Text;
+  private scoreValueText!: Phaser.GameObjects.Text;
+  private bestValueText!: Phaser.GameObjects.Text;
   private dangerLineGraphics!: Phaser.GameObjects.Graphics;
   private dangerWarningText!: Phaser.GameObjects.Text;
   private gameOverContainer!: Phaser.GameObjects.Container;
@@ -175,7 +176,7 @@ export class GameScene extends Phaser.Scene {
 
     this.dangerWarningText = this.add
       .text(GAME_WIDTH / 2, DANGER_LINE_Y + 8, '', {
-        fontFamily: 'sans-serif',
+        fontFamily: FONT_FAMILY,
         fontSize: '16px',
         color: '#e0463f',
         fontStyle: 'bold',
@@ -187,19 +188,35 @@ export class GameScene extends Phaser.Scene {
     // shows exactly what's about to fall, so a second "next" box was redundant.
     const statsTop = PANEL_TOP + 8;
 
-    this.scoreText = this.add.text(PANEL_LEFT + 10, statsTop, 'SCORE\n0', {
-      fontFamily: 'sans-serif',
-      fontSize: '16px',
+    // Small caption + a bigger bold number reads as a proper stat display instead of a plain
+    // two-line label — the number is the thing worth a glance, so it gets the visual weight.
+    this.add.text(PANEL_LEFT + 10, statsTop, 'SCORE', {
+      fontFamily: FONT_FAMILY,
+      fontSize: '11px',
+      fontStyle: '600',
+      color: '#8a6d4a',
+    });
+    this.scoreValueText = this.add.text(PANEL_LEFT + 10, statsTop + 14, '0', {
+      fontFamily: FONT_FAMILY,
+      fontSize: '22px',
+      fontStyle: '800',
       color: '#3a2b22',
-      align: 'left',
     });
 
-    this.bestText = this.add
-      .text(PANEL_RIGHT - 10, statsTop, `BEST\n${this.score.best}`, {
-        fontFamily: 'sans-serif',
-        fontSize: '16px',
+    this.add
+      .text(PANEL_RIGHT - 10, statsTop, 'BEST', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '11px',
+        fontStyle: '600',
+        color: '#8a6d4a',
+      })
+      .setOrigin(1, 0);
+    this.bestValueText = this.add
+      .text(PANEL_RIGHT - 10, statsTop + 14, `${this.score.best}`, {
+        fontFamily: FONT_FAMILY,
+        fontSize: '22px',
+        fontStyle: '800',
         color: '#3a2b22',
-        align: 'right',
       })
       .setOrigin(1, 0);
 
@@ -373,7 +390,7 @@ export class GameScene extends Phaser.Scene {
     // dark forest to an orange sunset — a plain fill alone only worked against the old flat pink.
     this.add
       .text(GAME_WIDTH / 2, HEADER_TEXT_HEIGHT / 2, '🐱 Cat Kingdom', {
-        fontFamily: 'sans-serif',
+        fontFamily: FONT_FAMILY,
         fontSize: '26px',
         color: '#3a2b22',
         fontStyle: 'bold',
@@ -386,7 +403,7 @@ export class GameScene extends Phaser.Scene {
     // Lion ever created (lifetime, via StatsSystem), tapping into the Collection Book's Stats tab.
     this.crownText = this.add
       .text(30, HEADER_TEXT_HEIGHT / 2, `👑 ${this.stats.get().lionsCreated}`, {
-        fontFamily: 'sans-serif',
+        fontFamily: FONT_FAMILY,
         fontSize: '18px',
         color: '#3a2b22',
         fontStyle: 'bold',
@@ -417,15 +434,29 @@ export class GameScene extends Phaser.Scene {
    */
   private buildPanel() {
     const graphics = this.add.graphics();
+    const radius = 16;
+    const width = PANEL_RIGHT - PANEL_LEFT;
 
+    // Rounded outer corners, square where the score bar meets the arena — a flat seam there
+    // reads as one continuous panel rather than a rounded rect sitting inside another.
     graphics.fillStyle(0xffc93c, 1);
-    graphics.fillRect(PANEL_LEFT, PANEL_TOP, PANEL_RIGHT - PANEL_LEFT, PANEL_DIVIDER_Y - PANEL_TOP);
+    graphics.fillRoundedRect(PANEL_LEFT, PANEL_TOP, width, PANEL_DIVIDER_Y - PANEL_TOP, {
+      tl: radius,
+      tr: radius,
+      bl: 0,
+      br: 0,
+    });
 
-    graphics.fillStyle(0xf5efe4, 0.82);
-    graphics.fillRect(PANEL_LEFT, PANEL_DIVIDER_Y, PANEL_RIGHT - PANEL_LEFT, PANEL_BOTTOM - PANEL_DIVIDER_Y);
+    graphics.fillStyle(0xf5efe4, 0.28);
+    graphics.fillRoundedRect(PANEL_LEFT, PANEL_DIVIDER_Y, width, PANEL_BOTTOM - PANEL_DIVIDER_Y, {
+      tl: 0,
+      tr: 0,
+      bl: radius,
+      br: radius,
+    });
 
     graphics.lineStyle(4, 0x1a1410, 1);
-    graphics.strokeRect(PANEL_LEFT, PANEL_TOP, PANEL_RIGHT - PANEL_LEFT, PANEL_BOTTOM - PANEL_TOP);
+    graphics.strokeRoundedRect(PANEL_LEFT, PANEL_TOP, width, PANEL_BOTTOM - PANEL_TOP, radius);
     graphics.lineBetween(PANEL_LEFT, PANEL_DIVIDER_Y, PANEL_RIGHT, PANEL_DIVIDER_Y);
   }
 
@@ -467,8 +498,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private refreshScoreText() {
-    this.scoreText.setText(`SCORE\n${this.score.score}`);
-    this.bestText.setText(`BEST\n${this.score.best}`);
+    this.scoreValueText.setText(`${this.score.score}`);
+    this.bestValueText.setText(`${this.score.best}`);
   }
 
   /** Syncs the hovering arena preview to `dropLevel`/`dropIsGolden` — the cat about to be dropped. */
@@ -586,7 +617,7 @@ export class GameScene extends Phaser.Scene {
 
     const title = this.add
       .text(GAME_WIDTH / 2, 40, '📖 Cat Kingdom', {
-        fontFamily: 'sans-serif',
+        fontFamily: FONT_FAMILY,
         fontSize: '20px',
         color: '#fdf6ec',
         fontStyle: 'bold',
@@ -603,7 +634,7 @@ export class GameScene extends Phaser.Scene {
       key: def.key,
       text: this.add
         .text(tabX[i], 74, def.label, {
-          fontFamily: 'sans-serif',
+          fontFamily: FONT_FAMILY,
           fontSize: '15px',
           color: '#c9bdae',
           fontStyle: 'bold',
@@ -617,7 +648,7 @@ export class GameScene extends Phaser.Scene {
 
     const closeHint = this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT - 24, 'Tap anywhere else to close', {
-        fontFamily: 'sans-serif',
+        fontFamily: FONT_FAMILY,
         fontSize: '14px',
         color: '#c9bdae',
       })
@@ -654,7 +685,7 @@ export class GameScene extends Phaser.Scene {
       const image = this.add.image(x, y, silhouetteTextureKeyForLevel(cat.level));
       const name = this.add
         .text(x, y + cellImageHeight * 0.7, '???', {
-          fontFamily: 'sans-serif',
+          fontFamily: FONT_FAMILY,
           fontSize: '14px',
           color: '#fdf6ec',
         })
@@ -670,7 +701,7 @@ export class GameScene extends Phaser.Scene {
   /** Lifetime totals up top, then a scrollable-free checklist of every achievement (locked ones dimmed, name/desc still shown). */
   private buildStatsTab(): Phaser.GameObjects.Container {
     const summary = this.add.text(GAME_WIDTH / 2, 108, '', {
-      fontFamily: 'sans-serif',
+      fontFamily: FONT_FAMILY,
       fontSize: '13px',
       color: '#fdf6ec',
       align: 'center',
@@ -690,7 +721,7 @@ export class GameScene extends Phaser.Scene {
       const icon = this.add.text(36, y, achievement.icon, { fontSize: '22px' }).setOrigin(0.5);
       const name = this.add
         .text(62, y - 11, achievement.name, {
-          fontFamily: 'sans-serif',
+          fontFamily: FONT_FAMILY,
           fontSize: '15px',
           color: '#fdf6ec',
           fontStyle: 'bold',
@@ -698,7 +729,7 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0, 0.5);
       const desc = this.add
         .text(62, y + 11, achievement.description, {
-          fontFamily: 'sans-serif',
+          fontFamily: FONT_FAMILY,
           fontSize: '12px',
           color: '#c9bdae',
         })
@@ -717,7 +748,7 @@ export class GameScene extends Phaser.Scene {
   private buildStyleTab(): Phaser.GameObjects.Container {
     const intro = this.add
       .text(GAME_WIDTH / 2, 100, 'Pick your Golden Cat glow color', {
-        fontFamily: 'sans-serif',
+        fontFamily: FONT_FAMILY,
         fontSize: '14px',
         color: '#c9bdae',
       })
@@ -736,7 +767,7 @@ export class GameScene extends Phaser.Scene {
       const circle = this.add.circle(cx, y, 22, option.color, 1).setStrokeStyle(2, 0xfdf6ec, 0.4);
       const name = this.add
         .text(cx + 40, y - 11, option.name, {
-          fontFamily: 'sans-serif',
+          fontFamily: FONT_FAMILY,
           fontSize: '15px',
           color: '#fdf6ec',
           fontStyle: 'bold',
@@ -744,7 +775,7 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0, 0.5);
       const status = this.add
         .text(cx + 40, y + 11, '', {
-          fontFamily: 'sans-serif',
+          fontFamily: FONT_FAMILY,
           fontSize: '12px',
           color: '#c9bdae',
         })
@@ -925,7 +956,7 @@ export class GameScene extends Phaser.Scene {
     children.push(
       this.add
         .text(-width / 2 + 62, -15, eyebrow, {
-          fontFamily: 'sans-serif',
+          fontFamily: FONT_FAMILY,
           fontSize: '11px',
           color: accentHex,
           fontStyle: 'bold',
@@ -933,7 +964,7 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0, 0.5),
       this.add
         .text(-width / 2 + 62, 12, title, {
-          fontFamily: 'sans-serif',
+          fontFamily: FONT_FAMILY,
           fontSize: '19px',
           color: '#fdf6ec',
           fontStyle: 'bold',
@@ -987,7 +1018,7 @@ export class GameScene extends Phaser.Scene {
 
     const title = this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2, '👑 THE KING HAS ARRIVED 👑', {
-        fontFamily: 'sans-serif',
+        fontFamily: FONT_FAMILY,
         fontSize: '22px',
         color: '#ffd873',
         fontStyle: 'bold',
@@ -1077,7 +1108,7 @@ export class GameScene extends Phaser.Scene {
   private showComboPopup(combo: number, x: number, y: number) {
     const text = this.add
       .text(x, y - 10, comboLabel(combo), {
-        fontFamily: 'sans-serif',
+        fontFamily: FONT_FAMILY,
         fontSize: '23px',
         color: '#ff6f3c',
         fontStyle: 'bold',
@@ -1149,7 +1180,7 @@ export class GameScene extends Phaser.Scene {
 
     const text = this.add
       .text(GAME_WIDTH / 2, CONTAINER_TOP + 60, `CLUTCH SAVE! +${CLUTCH_SAVE_BONUS}`, {
-        fontFamily: 'sans-serif',
+        fontFamily: FONT_FAMILY,
         fontSize: '25px',
         color: '#2ecc71',
         fontStyle: 'bold',
@@ -1182,7 +1213,7 @@ export class GameScene extends Phaser.Scene {
 
     const title = this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 130, 'CAT-ASTROPHE!', {
-        fontFamily: 'sans-serif',
+        fontFamily: FONT_FAMILY,
         fontSize: '30px',
         color: '#ffffff',
         fontStyle: 'bold',
@@ -1194,7 +1225,7 @@ export class GameScene extends Phaser.Scene {
 
     this.finalScoreText = this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 50, '', {
-        fontFamily: 'sans-serif',
+        fontFamily: FONT_FAMILY,
         fontSize: '20px',
         color: '#ffffff',
         align: 'center',
@@ -1203,7 +1234,7 @@ export class GameScene extends Phaser.Scene {
 
     const restartHint = this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 115, 'Tap to try again', {
-        fontFamily: 'sans-serif',
+        fontFamily: FONT_FAMILY,
         fontSize: '18px',
         color: '#f7ecd9',
       })
