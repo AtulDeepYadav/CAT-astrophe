@@ -1,0 +1,49 @@
+/**
+ * Single source of truth for the 10 MVP cat levels.
+ * Every system (spawner, merge, scoring, audio, sprites) reads from this table
+ * instead of hardcoding level numbers — balance changes happen in one place.
+ */
+export interface CatLevelData {
+  level: number;
+  name: string;
+  /** Physics body radius in pixels at this level. */
+  radius: number;
+  /** Unused now that real art (public/assets/sprites/cats) replaced the placeholder circles — kept for possible future UI accent theming per cat. */
+  color: number;
+  outlineColor: number;
+  /** Score awarded when this cat is created via a merge. */
+  points: number;
+}
+
+export const CAT_LEVELS: CatLevelData[] = [
+  { level: 1, name: 'Kitten', radius: 18, color: 0xfff2cc, outlineColor: 0xd9b96a, points: 1 },
+  { level: 2, name: 'Tabby', radius: 24, color: 0xf5c98a, outlineColor: 0xc98f45, points: 3 },
+  { level: 3, name: 'Fluffy Cat', radius: 31, color: 0xf0a35e, outlineColor: 0xb8722f, points: 6 },
+  { level: 4, name: 'House Cat', radius: 39, color: 0xe98a63, outlineColor: 0xaa5836, points: 10 },
+  { level: 5, name: 'Wildcat', radius: 48, color: 0xd97a5a, outlineColor: 0x954a2e, points: 15 },
+  { level: 6, name: 'Lynx', radius: 58, color: 0xc2704f, outlineColor: 0x7d3f24, points: 21 },
+  { level: 7, name: 'Cheetah', radius: 69, color: 0xdba24a, outlineColor: 0x8f6421, points: 28 },
+  { level: 8, name: 'Leopard', radius: 81, color: 0xc98d2e, outlineColor: 0x7a561c, points: 36 },
+  { level: 9, name: 'Tiger', radius: 94, color: 0xe07a3e, outlineColor: 0x8c451e, points: 45 },
+  { level: 10, name: 'Lion', radius: 108, color: 0xd4a017, outlineColor: 0x7d5c0d, points: 55 },
+];
+
+export function getCatData(level: number): CatLevelData {
+  const data = CAT_LEVELS[level - 1];
+  if (!data) {
+    throw new Error(`No cat data for level ${level}`);
+  }
+  return data;
+}
+
+export const MAX_CAT_LEVEL = CAT_LEVELS.length;
+
+/** Levels that can appear as a randomly spawned "next cat" (kept low so the board doesn't fill instantly). */
+export const SPAWNABLE_LEVELS = [1, 2, 3, 4];
+
+export function textureKeyForLevel(level: number): string {
+  return `cat-${level}`;
+}
+
+/** Soft radial-gradient texture generated once in BootScene, reused behind every Golden Cat. */
+export const GOLDEN_GLOW_TEXTURE = 'golden-glow';
