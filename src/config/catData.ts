@@ -85,6 +85,17 @@ export function silhouetteTextureKeyForLevel(level: number): string {
   return `cat-${level}-silhouette`;
 }
 
+/**
+ * A large, detailed illustration per level (cropped straight from the character sheets in
+ * assets-source/Cat Photos/, see assets-source/extract_hero_portraits.py) — much higher fidelity
+ * than the small in-game sprite, which reads fine at ~40-150px on the board but looks soft blown
+ * up to the size the Menu and Game Over screens want. Used only where a cat is the whole point of
+ * the screen, not during gameplay.
+ */
+export function portraitTextureKeyForLevel(level: number): string {
+  return `cat-${level}-portrait`;
+}
+
 /** Soft radial-gradient texture generated once in BootScene, reused behind every Golden Cat. */
 export const GOLDEN_GLOW_TEXTURE = 'golden-glow';
 

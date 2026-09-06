@@ -7,7 +7,9 @@ import { ScoreSystem } from '../systems/ScoreSystem';
 import { LeaderboardSystem } from '../systems/LeaderboardSystem';
 import { DailyChallengeSystem } from '../systems/DailyChallengeSystem';
 import { SettingsSystem } from '../systems/SettingsSystem';
+import { CollectionSystem } from '../systems/CollectionSystem';
 import { exportSaveData, importSaveData } from '../systems/saveBackup';
+import { getCatData, portraitTextureKeyForLevel } from '../config/catData';
 
 /**
  * Title screen — the game used to boot straight into a live round with no beat before the
@@ -90,6 +92,8 @@ export class MenuScene extends Phaser.Scene {
     this.buildMenuButton(GAME_WIDTH / 2, 420, '🌙  Zen Mode', '#c9b6f0', () => this.startGame('zen'));
 
     this.buildMenuButton(GAME_WIDTH / 2, 490, '🏆  Leaderboard', '#ffe6a7', () => this.toggleLeaderboard(true));
+
+    this.buildHeroShowcase();
 
     // Secondary maintenance actions, deliberately low-key (plain text, no button chrome) so they
     // don't compete with Play/Daily/Zen/Leaderboard — this is a stopgap for real cloud save
@@ -195,6 +199,63 @@ export class MenuScene extends Phaser.Scene {
 
   private startGame(mode: GameMode) {
     this.scene.start('Game', { mode });
+  }
+
+  /**
+   * Shows off the player's own best-ever cat in the open space below the menu buttons — the
+   * title screen used to be just a logo and a button stack with no personality of its own, and
+   * no reason to look twice before tapping Play. A brand-new player with nothing discovered yet
+   * still sees the Kitten here (CollectionSystem.highestDiscoveredLevel defaults to 1), so the
+   * spot is never empty.
+   */
+  private buildHeroShowcase() {
+    const collection = new CollectionSystem();
+    const heroLevel = collection.highestDiscoveredLevel();
+    const heroData = getCatData(heroLevel);
+    const centerX = GAME_WIDTH / 2;
+    const centerY = 630;
+    const targetHeight = 190;
+
+    const portrait = this.add.image(centerX, centerY, portraitTextureKeyForLevel(heroLevel));
+    const scale = targetHeight / portrait.height;
+    portrait.setScale(scale * 0.5).setAlpha(0);
+
+    const caption = this.add
+      .text(centerX, centerY + targetHeight / 2 + 22, `Your best: ${heroData.name}`, {
+        fontFamily: FONT_FAMILY,
+        fontSize: '14px',
+        fontStyle: '700',
+        color: '#fff6e8',
+        stroke: '#3a2b22',
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5)
+      .setAlpha(0);
+
+    // A bounce-in entrance rather than just appearing — the one bit of "ta-da" this screen gets,
+    // since it's the first thing a player sees every single session.
+    this.tweens.add({
+      targets: portrait,
+      scaleX: scale,
+      scaleY: scale,
+      alpha: 1,
+      duration: 520,
+      delay: 150,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        // Gentle continuous bob once settled — makes the title screen read as alive rather than
+        // a static poster, without competing with the buttons above for attention.
+        this.tweens.add({
+          targets: portrait,
+          y: centerY - 10,
+          duration: 1400,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut',
+        });
+      },
+    });
+    this.tweens.add({ targets: caption, alpha: 1, duration: 400, delay: 500 });
   }
 
   private buildMenuButton(

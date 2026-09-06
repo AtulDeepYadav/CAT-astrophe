@@ -16,6 +16,12 @@ export class CollectionSystem {
     return this.discovered.has(level);
   }
 
+  /** Highest level ever discovered, or 1 (Kitten) for a brand-new player with nothing discovered
+   * yet — used to pick which cat's portrait to show off on the title screen. */
+  highestDiscoveredLevel(): number {
+    return this.discovered.size > 0 ? Math.max(...this.discovered) : 1;
+  }
+
   /** Records a level as discovered. Returns true only the first time it's ever seen. */
   discover(level: number): boolean {
     if (this.discovered.has(level)) {

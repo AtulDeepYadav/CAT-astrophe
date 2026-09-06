@@ -5,6 +5,7 @@ import {
   GOLDEN_GLOW_TEXTURE,
   hasMergeSound,
   mergeSoundKey,
+  portraitTextureKeyForLevel,
   silhouetteTextureKeyForLevel,
   textureKeyForLevel,
 } from '../config/catData';
@@ -46,6 +47,7 @@ export class BootScene extends Phaser.Scene {
         silhouetteTextureKeyForLevel(cat.level),
         `assets/sprites/cats/cat-${cat.level}-silhouette.webp`,
       );
+      this.load.image(portraitTextureKeyForLevel(cat.level), `assets/portraits/cat-${cat.level}.webp`);
 
       for (const frame of framesForLevel(cat.level)) {
         this.load.image(

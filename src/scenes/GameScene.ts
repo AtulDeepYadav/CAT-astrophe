@@ -23,6 +23,7 @@ import {
   MAX_CAT_LEVEL,
   getCatData,
   pickWeightedSpawnLevel,
+  portraitTextureKeyForLevel,
   silhouetteTextureKeyForLevel,
   textureKeyForLevel,
 } from '../config/catData';
@@ -156,6 +157,8 @@ export class GameScene extends Phaser.Scene {
   private gameOverContainer!: Phaser.GameObjects.Container;
   private finalScoreText!: Phaser.GameObjects.Text;
   private finalCatPortrait!: Phaser.GameObjects.Image;
+  private finalCatGlow!: Phaser.GameObjects.Image;
+  private newBestBanner!: Phaser.GameObjects.Text;
   private purrBarFill!: Phaser.GameObjects.Rectangle;
   private purrBarY = 0;
   private purrBarLeft = 0;
@@ -1852,10 +1855,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildGameOverOverlay(): Phaser.GameObjects.Container {
+    const centerX = GAME_WIDTH / 2;
+    const centerY = GAME_HEIGHT / 2;
     const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.6).setOrigin(0, 0);
 
     const title = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 130, 'CAT-ASTROPHE!', {
+      .text(centerX, centerY - 260, 'CAT-ASTROPHE!', {
         fontFamily: FONT_FAMILY,
         fontSize: '30px',
         color: '#ffffff',
@@ -1863,11 +1868,36 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    this.finalCatPortrait = this.add.image(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 50, textureKeyForLevel(1));
-    this.finalCatPortrait.setDisplaySize(76, 76);
+    // Hidden by default — triggerGameOver() shows it only when this run matched or beat the
+    // persisted best, and it's the thing playBirthBounce-style entrance tweens below fire for.
+    this.newBestBanner = this.add
+      .text(centerX, centerY - 215, '🎉 NEW BEST! 🎉', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '19px',
+        fontStyle: '800',
+        color: '#ffd873',
+        stroke: '#3a2b22',
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5)
+      .setVisible(false);
+
+    // A soft glow behind the portrait so it reads as a celebratory "trophy" moment rather than a
+    // small illustration pasted on a dark overlay — same golden-glow texture Golden Cats already
+    // use elsewhere, just much bigger and dimmer here.
+    this.finalCatGlow = this.add.image(centerX, centerY - 70, GOLDEN_GLOW_TEXTURE);
+    this.finalCatGlow.setBlendMode(Phaser.BlendModes.ADD);
+    this.finalCatGlow.setTint(0xffd873);
+    this.finalCatGlow.setAlpha(0.5);
+    this.finalCatGlow.setDisplaySize(260, 260);
+
+    // Much larger and far more detailed than the small in-game sprite (see
+    // portraitTextureKeyForLevel's own doc comment) — this is the one moment in the whole app
+    // where a cat's art is the actual point of the screen, not just a board piece.
+    this.finalCatPortrait = this.add.image(centerX, centerY - 70, portraitTextureKeyForLevel(1));
 
     this.finalScoreText = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 50, '', {
+      .text(centerX, centerY + 130, '', {
         fontFamily: FONT_FAMILY,
         fontSize: '20px',
         color: '#ffffff',
@@ -1876,7 +1906,7 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const restartHint = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 115, 'Tap to try again', {
+      .text(centerX, centerY + 205, 'Tap to try again', {
         fontFamily: FONT_FAMILY,
         fontSize: '18px',
         color: '#f7ecd9',
@@ -1884,7 +1914,7 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const shareButton = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 160, '🐾 Share Score', {
+      .text(centerX, centerY + 250, '🐾 Share Score', {
         fontFamily: FONT_FAMILY,
         fontSize: '17px',
         fontStyle: '700',
@@ -1906,6 +1936,8 @@ export class GameScene extends Phaser.Scene {
     const container = this.add.container(0, 0, [
       overlayBg,
       title,
+      this.newBestBanner,
+      this.finalCatGlow,
       this.finalCatPortrait,
       this.finalScoreText,
       restartHint,
@@ -1979,7 +2011,7 @@ export class GameScene extends Phaser.Scene {
   /** Small transient message over the game-over overlay — used by the share-fallback paths. */
   private showToast(message: string) {
     const toast = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 210, message, {
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 300, message, {
         fontFamily: FONT_FAMILY,
         fontSize: '14px',
         color: '#f7ecd9',
@@ -2001,11 +2033,15 @@ export class GameScene extends Phaser.Scene {
   private triggerGameOver() {
     this.isGameOver = true;
     this.tweens.killTweensOf(this.dangerWarningText); // stop the heartbeat pulse if it was mid-danger
-    this.vibrate([60, 50, 100]); // a distinct falling pattern, not just a longer version of the merge tap
 
     const bestCat = getCatData(this.highestLevelThisRun);
-    this.finalCatPortrait.setTexture(textureKeyForLevel(this.highestLevelThisRun));
     const summary = `You reached ${bestCat.name}!\nScore: ${this.score.score}\nBest: ${this.score.best}`;
+
+    // ScoreSystem.add() already rolled `best` up to match `score` mid-run if this run set a new
+    // one — by now the two being equal (and non-zero) IS the "new best" signal, no separate flag
+    // to track through the whole run.
+    const isNewBest = this.score.score > 0 && this.score.score >= this.score.best;
+    this.vibrate(isNewBest ? [40, 40, 40, 40, 120] : [60, 50, 100]); // a brighter pattern for a new best, distinct from the plain falling one
 
     // Zen Mode has no fail state, so triggerGameOver is never called for it in the first place —
     // every run that gets here is a normal or daily attempt, both fair game for the leaderboard.
@@ -2030,6 +2066,45 @@ export class GameScene extends Phaser.Scene {
 
     this.finalScoreText.setText(bonusLine ? `${summary}\n${bonusLine}` : summary);
     this.gameOverContainer.setVisible(true);
+    this.newBestBanner.setVisible(isNewBest).setScale(0.6).setAlpha(0);
+
+    // The big portrait (see portraitTextureKeyForLevel) pops in with a bounce rather than just
+    // appearing — this is the one screen in the whole app where a cat's art is the actual point,
+    // so it earns a proper entrance instead of a flat setVisible(true) like the rest of the overlay.
+    const targetHeight = 190;
+    this.finalCatPortrait.setTexture(portraitTextureKeyForLevel(this.highestLevelThisRun));
+    const portraitScale = targetHeight / this.finalCatPortrait.height;
+    this.finalCatPortrait.setScale(portraitScale * 0.4).setAlpha(0);
+    this.finalCatGlow.setScale(0.4).setAlpha(0);
+    this.tweens.add({
+      targets: this.finalCatGlow,
+      scale: 1,
+      alpha: 0.5,
+      duration: 420,
+      delay: 120,
+      ease: 'Sine.easeOut',
+    });
+    this.tweens.add({
+      targets: this.finalCatPortrait,
+      scaleX: portraitScale,
+      scaleY: portraitScale,
+      alpha: 1,
+      duration: 480,
+      delay: 120,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        if (isNewBest) {
+          this.tweens.add({
+            targets: this.newBestBanner,
+            scale: 1,
+            alpha: 1,
+            duration: 260,
+            ease: 'Back.easeOut',
+          });
+          this.spawnCelebrationBurst(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 70);
+        }
+      },
+    });
 
     this.input.once('pointerdown', () => {
       // Explicit mode, not a bare restart() — Phaser doesn't carry init() data forward on its
@@ -2037,5 +2112,29 @@ export class GameScene extends Phaser.Scene {
       // player back into Normal mode instead of letting them retry the same challenge.
       this.scene.restart({ mode: this.mode });
     });
+  }
+
+  /** A wider, longer-lived, more colorful burst than spawnComboSparks — reserved for the rarer
+   * "beat your own best score" moment on the game-over screen, not every ordinary merge. */
+  private spawnCelebrationBurst(x: number, y: number) {
+    const colors = [0xffd873, 0xff6f9c, 0x8fd3ff, 0xffffff];
+    const count = 16;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.3;
+      const distance = 90 + Math.random() * 60;
+      const spark = this.add
+        .circle(x, y, 4 + Math.random() * 3, colors[i % colors.length], 0.95)
+        .setDepth(1001);
+      this.tweens.add({
+        targets: spark,
+        x: x + Math.cos(angle) * distance,
+        y: y + Math.sin(angle) * distance,
+        alpha: 0,
+        scale: 0.2,
+        duration: 700 + Math.random() * 300,
+        ease: 'Cubic.easeOut',
+        onComplete: () => spark.destroy(),
+      });
+    }
   }
 }
