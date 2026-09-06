@@ -31,7 +31,7 @@ import { Cat } from '../entities/Cat';
 import { registerMergeSystem } from '../systems/MergeSystem';
 import { DangerLineSystem } from '../systems/DangerLineSystem';
 import { ScoreSystem } from '../systems/ScoreSystem';
-import { ComboSystem, comboLabel } from '../systems/ComboSystem';
+import { ComboSystem, MAX_COMBO_TIER, comboLabel } from '../systems/ComboSystem';
 import { PurrMeterSystem } from '../systems/PurrMeterSystem';
 import { AudioSystem } from '../systems/AudioSystem';
 import { IdleSystem } from '../systems/IdleSystem';
@@ -51,16 +51,27 @@ const CLUTCH_SAVE_BONUS = 25;
 /** Danger line color ramps from calm orange to alarm red as progress (0..1) climbs. */
 const DANGER_COLOR_START = 0xffa53d;
 const DANGER_COLOR_END = 0xe0463f;
+/** Cheetah and up count as "Big Cats" — the header's headline stat, and where discoveries start getting the bigger cinematic treatment. */
+const BIG_CAT_LEVEL = 7;
 /** Lion is the mid-game "king" milestone; three Legendary+ tiers now exist above it. */
 const LION_LEVEL = 10;
 /** One-time bonus for the Lion cinematic moment (first-ever Lion). */
 const LION_DISCOVERY_BONUS = 200;
 /** One-time bonus for the Celestial Cat cinematic (first-ever true final form). */
 const CELESTIAL_DISCOVERY_BONUS = 500;
+/** One-time bonus for a "New Species" cinematic (Big Cats other than Lion/Celestial, which have their own bespoke moments and bonuses). */
+const NEW_SPECIES_BONUS = 100;
 /** Accent color for achievement-unlock banners — distinct from the cat-discovery gold. */
 const ACHIEVEMENT_ACCENT = 0x8ec6ff;
 /** Shared between buildCatsTab (layout) and openCollectionBook (re-scaling on open) so they can't drift apart. */
 const COLLECTION_CELL_IMAGE_HEIGHT = 50;
+/** Flavor text for the once-per-run "you've reached a new area" banner — home has none, it's the starting zone. */
+const ZONE_TRANSITION_TEXT: Partial<Record<WorldZoneKey, { emoji: string; title: string }>> = {
+  backyard: { emoji: '🌿', title: 'THE OUTSIDE WORLD AWAITS' },
+  forest: { emoji: '🌲', title: 'ENTERING THE WILD' },
+  jungle: { emoji: '🐆', title: 'THE JUNGLE CALLS' },
+  savannah: { emoji: '👑', title: 'WHERE THE WILD KINGS ROAM' },
+};
 
 type CollectionBookTab = 'cats' | 'stats' | 'style';
 
@@ -82,7 +93,7 @@ export class GameScene extends Phaser.Scene {
   private stats = new StatsSystem();
   private achievements = new AchievementSystem();
   private cosmetics = new CosmeticsSystem();
-  private crownText!: Phaser.GameObjects.Text;
+  private bigCatText!: Phaser.GameObjects.Text;
 
   private collectionBookContainer!: Phaser.GameObjects.Container;
   private collectionBookTab: CollectionBookTab = 'cats';
@@ -196,42 +207,27 @@ export class GameScene extends Phaser.Scene {
 
     // Stats section of the panel (yellow, per the sketch): Score (left) / Best (right), plus the
     // Purr Meter bar. No next-cat preview here — the hovering drop cat in the arena already
-    // shows exactly what's about to fall, so a second "next" box was redundant.
-    const statsTop = PANEL_TOP + 8;
+    // shows exactly what's about to fall, so a second "next" box was redundant. One compact line
+    // per side instead of a label-over-number card — the arena gets the vertical space back.
+    const statsTop = PANEL_TOP + 9;
 
-    // Small caption + a bigger bold number reads as a proper stat display instead of a plain
-    // two-line label — the number is the thing worth a glance, so it gets the visual weight.
-    this.add.text(PANEL_LEFT + 10, statsTop, 'SCORE', {
+    this.scoreValueText = this.add.text(PANEL_LEFT + 10, statsTop, 'SCORE 0', {
       fontFamily: FONT_FAMILY,
-      fontSize: '11px',
-      fontStyle: '600',
-      color: '#8a6d4a',
-    });
-    this.scoreValueText = this.add.text(PANEL_LEFT + 10, statsTop + 14, '0', {
-      fontFamily: FONT_FAMILY,
-      fontSize: '22px',
+      fontSize: '16px',
       fontStyle: '800',
       color: '#3a2b22',
     });
 
-    this.add
-      .text(PANEL_RIGHT - 10, statsTop, 'BEST', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '11px',
-        fontStyle: '600',
-        color: '#8a6d4a',
-      })
-      .setOrigin(1, 0);
     this.bestValueText = this.add
-      .text(PANEL_RIGHT - 10, statsTop + 14, `${this.score.best}`, {
+      .text(PANEL_RIGHT - 10, statsTop, `BEST ${this.score.best}`, {
         fontFamily: FONT_FAMILY,
-        fontSize: '22px',
+        fontSize: '16px',
         fontStyle: '800',
         color: '#3a2b22',
       })
       .setOrigin(1, 0);
 
-    this.buildPurrBar(statsTop + 40);
+    this.buildPurrBar(statsTop + 22);
 
     // The hovering "current drop" cat + its golden glow + a faint aim guide toward the floor.
     this.aimGuide = this.add.graphics();
@@ -263,12 +259,17 @@ export class GameScene extends Phaser.Scene {
         const { combo, multiplier } = this.combo.registerMerge();
         const points = getCatData(newLevel).points * multiplier * (isGolden ? 2 : 1);
 
+        // Checked before collection.discover() mutates state — updateWorldBackground fires its
+        // own once-per-run zone banner and needs to know whether a cat-discovery banner/cinematic
+        // is also about to fire this same merge, so it can wait its turn instead of colliding.
+        const willDiscoverThisMerge = !this.collection.isDiscovered(newLevel);
+
         this.score.add(points);
         this.refreshScoreText();
         this.audio.playMergeTone(newLevel);
         this.showMergeBurst(x, y, isGolden);
         this.highestLevelThisRun = Math.max(this.highestLevelThisRun, newLevel);
-        this.updateWorldBackground(this.highestLevelThisRun);
+        this.updateWorldBackground(this.highestLevelThisRun, willDiscoverThisMerge);
 
         this.purrMeter.addProgress();
         this.refreshPurrBar();
@@ -290,9 +291,12 @@ export class GameScene extends Phaser.Scene {
           this.tryUnlockAchievement('combo_5');
         }
 
+        if (newLevel >= BIG_CAT_LEVEL) {
+          this.stats.recordBigCat();
+          this.refreshBigCatText();
+        }
         if (newLevel === LION_LEVEL) {
           this.stats.recordLion();
-          this.refreshCrownText();
           // Silent: the Lion cinematic below is already the celebration for this moment —
           // a second banner popping up mid-cinematic would just be visual clutter.
           this.tryUnlockAchievement('first_lion', { silent: true });
@@ -306,6 +310,8 @@ export class GameScene extends Phaser.Scene {
             this.showLionCinematic();
           } else if (newLevel === MAX_CAT_LEVEL) {
             this.showCelestialCinematic();
+          } else if (newLevel >= BIG_CAT_LEVEL) {
+            this.showNewSpeciesCinematic(newLevel);
           } else {
             this.showDiscoveryBanner(newLevel);
           }
@@ -321,11 +327,23 @@ export class GameScene extends Phaser.Scene {
         if (!this.hasPlayedDangerWarning) {
           this.hasPlayedDangerWarning = true;
           this.audio.playDangerWarning();
+          // A slow heartbeat-like pulse while the warning is up adds tension without changing
+          // the text's actual readability — it settles back to rest the instant the board clears.
+          this.tweens.add({
+            targets: this.dangerWarningText,
+            scale: 1.1,
+            duration: 260,
+            yoyo: true,
+            repeat: -1,
+            ease: 'Sine.easeInOut',
+          });
         }
         this.updateDangerVisuals(progress);
       },
       onSafe: (dangerDurationMs) => {
         this.dangerWarningText.setText('');
+        this.tweens.killTweensOf(this.dangerWarningText);
+        this.dangerWarningText.setScale(1);
         this.resetDangerVisuals();
         if (dangerDurationMs >= CLUTCH_SAVE_MIN_DANGER_MS) {
           this.showClutchSave();
@@ -415,10 +433,12 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    // Crown count, top-left of the header — symmetric with the Collection Book button, +1 per
-    // Lion ever created (lifetime, via StatsSystem), tapping into the Collection Book's Stats tab.
-    this.crownText = this.add
-      .text(30, HEADER_TEXT_HEIGHT / 2, `👑 ${this.stats.get().lionsCreated}`, {
+    // Big Cats count, top-left of the header — symmetric with the Collection Book button, +1 per
+    // Cheetah-or-bigger ever merged (lifetime, via StatsSystem), tapping into the Collection
+    // Book's Stats tab. Was a Lion-only "crown" count, but "👑 0" told a new player nothing —
+    // this at least reads as a running tally even before they know exactly what it counts.
+    this.bigCatText = this.add
+      .text(30, HEADER_TEXT_HEIGHT / 2, `🐆 ${this.stats.get().bigCatsCreated}`, {
         fontFamily: FONT_FAMILY,
         fontSize: '18px',
         color: '#3a2b22',
@@ -439,8 +459,8 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5);
   }
 
-  private refreshCrownText() {
-    this.crownText.setText(`👑 ${this.stats.get().lionsCreated}`);
+  private refreshBigCatText() {
+    this.bigCatText.setText(`🐆 ${this.stats.get().bigCatsCreated}`);
   }
 
   /**
@@ -470,8 +490,14 @@ export class GameScene extends Phaser.Scene {
     graphics.lineBetween(PANEL_LEFT, PANEL_DIVIDER_Y, PANEL_RIGHT, PANEL_DIVIDER_Y);
   }
 
-  /** Crossfades the world backdrop when `level` puts the player in a new zone (see worldZones.ts). */
-  private updateWorldBackground(level: number) {
+  /**
+   * Crossfades the world backdrop when `level` puts the player in a new zone (see worldZones.ts),
+   * and queues that zone's once-per-run announcement banner. `willDiscoverThisMerge` lets the
+   * caller warn us a cat-discovery banner/cinematic is about to fire from this same merge (e.g.
+   * reaching level 9 is both a new zone AND a new Tiger) — the zone banner waits its turn instead
+   * of rendering on top of it.
+   */
+  private updateWorldBackground(level: number, willDiscoverThisMerge: boolean) {
     const zone = zoneForLevel(level);
     if (zone.key === this.currentZoneKey) {
       return;
@@ -491,6 +517,26 @@ export class GameScene extends Phaser.Scene {
         this.tweens.add({ targets: this.worldBackground, alpha: 1, duration: 420, ease: 'Sine.easeOut' });
       },
     });
+
+    // A discovery banner holds ~2s, the Lion/Celestial/New Species cinematics ~2.3s — 2600ms
+    // clears the longest of those with room to spare. Otherwise just let the merge burst settle.
+    const delay = willDiscoverThisMerge ? 2600 : 400;
+    this.time.delayedCall(delay, () => this.showZoneTransitionBanner(zone.key));
+  }
+
+  /** Once-per-run "you've reached a new area" banner — home has none, it's the starting zone. */
+  private showZoneTransitionBanner(zoneKey: WorldZoneKey) {
+    const flavor = ZONE_TRANSITION_TEXT[zoneKey];
+    if (!flavor) {
+      return;
+    }
+    this.showCelebrationBanner({
+      portraitEmoji: flavor.emoji,
+      eyebrow: 'NEW AREA UNLOCKED',
+      title: flavor.title,
+      accentColor: 0xffd873,
+      holdMs: 1400,
+    });
   }
 
   update(_time: number, delta: number) {
@@ -508,8 +554,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private refreshScoreText() {
-    this.scoreValueText.setText(`${this.score.score}`);
-    this.bestValueText.setText(`${this.score.best}`);
+    this.scoreValueText.setText(`SCORE ${this.score.score}`);
+    this.bestValueText.setText(`BEST ${this.score.best}`);
   }
 
   /** Syncs the hovering arena preview to `dropLevel`/`dropIsGolden` — the cat about to be dropped. */
@@ -827,7 +873,7 @@ export class GameScene extends Phaser.Scene {
     const summary = this.statsTabContainer.getByName('statsSummary') as Phaser.GameObjects.Text | null;
     summary?.setText(
       `Games Played: ${s.gamesPlayed}    Cats Merged: ${s.totalCatsMerged}\n` +
-        `Biggest Combo: x${s.biggestCombo}    Lions Crowned: ${s.lionsCreated}`,
+        `Biggest Combo: x${s.biggestCombo}    Big Cats Merged: ${s.bigCatsCreated}`,
     );
     for (const achievement of ACHIEVEMENTS) {
       const unlocked = this.achievements.isUnlocked(achievement.id);
@@ -841,9 +887,9 @@ export class GameScene extends Phaser.Scene {
       icon?.setText(unlocked ? achievement.icon : '🔒');
     }
 
-    const crowns = this.stats.get().lionsCreated;
+    const bigCats = this.stats.get().bigCatsCreated;
     for (const option of COSMETIC_OPTIONS) {
-      const unlocked = this.cosmetics.isUnlocked(option.id, crowns);
+      const unlocked = this.cosmetics.isUnlocked(option.id, bigCats);
       const selected = this.cosmetics.getSelectedId() === option.id;
       const circle = this.styleTabContainer.getByName(`style-circle-${option.id}`) as Phaser.GameObjects.Arc | null;
       const name = this.styleTabContainer.getByName(`style-name-${option.id}`) as Phaser.GameObjects.Text | null;
@@ -851,7 +897,7 @@ export class GameScene extends Phaser.Scene {
       circle?.setAlpha(unlocked ? 1 : 0.3);
       circle?.setStrokeStyle(selected ? 3 : 2, selected ? 0xffffff : 0xfdf6ec, selected ? 1 : 0.4);
       name?.setAlpha(unlocked ? 1 : 0.4);
-      status?.setText(selected ? 'Selected' : unlocked ? 'Tap to select' : `🔒 Needs ${option.unlockCrowns} 👑`);
+      status?.setText(selected ? 'Selected' : unlocked ? 'Tap to select' : `🔒 Needs ${option.unlockBigCats} 🐆`);
     }
 
     this.setCollectionBookTab('cats');
@@ -896,8 +942,8 @@ export class GameScene extends Phaser.Scene {
 
   /** Selects a cosmetic if unlocked, re-rendering the Style tab's selection state in place. */
   private selectCosmetic(id: string) {
-    const crowns = this.stats.get().lionsCreated;
-    if (!this.cosmetics.select(id, crowns)) {
+    const bigCats = this.stats.get().bigCatsCreated;
+    if (!this.cosmetics.select(id, bigCats)) {
       return;
     }
     for (const option of COSMETIC_OPTIONS) {
@@ -905,7 +951,7 @@ export class GameScene extends Phaser.Scene {
       const circle = this.styleTabContainer.getByName(`style-circle-${option.id}`) as Phaser.GameObjects.Arc | null;
       const status = this.styleTabContainer.getByName(`style-status-${option.id}`) as Phaser.GameObjects.Text | null;
       circle?.setStrokeStyle(selected ? 3 : 2, selected ? 0xffffff : 0xfdf6ec, selected ? 1 : 0.4);
-      status?.setText(selected ? 'Selected' : this.cosmetics.isUnlocked(option.id, crowns) ? 'Tap to select' : status?.text ?? '');
+      status?.setText(selected ? 'Selected' : this.cosmetics.isUnlocked(option.id, bigCats) ? 'Tap to select' : status?.text ?? '');
     }
   }
 
@@ -1042,12 +1088,38 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Shared "big moment" cinematic beat: freezes attention on a colored flash, a camera punch,
-   * and a title card, plus a score bonus. Lion and Celestial Cat both use this, just recolored
-   * and retitled — see showLionCinematic/showCelestialCinematic for the sound each one plays.
+   * First-ever discovery of a Big Cat that isn't Lion or Celestial (Cheetah, Leopard, Tiger,
+   * White Lion, Golden Lion) — the same cinematic beat, but skips the camera zoom-punch so Lion
+   * and Celestial Cat still read as the two biggest moments in the run rather than being matched.
    */
-  private playMilestoneCinematic(opts: { tintColor: number; textColor: string; title: string; bonus: number }) {
-    const { tintColor, textColor, title: titleStr, bonus } = opts;
+  private showNewSpeciesCinematic(level: number) {
+    const data = getCatData(level);
+    this.audio.playMergeTone(level);
+    this.playMilestoneCinematic({
+      tintColor: 0xffd873,
+      textColor: '#ffd873',
+      title: `🌟 NEW SPECIES! 🌟\n${data.name}`,
+      subtitle: 'Added to your Cat-alogue!',
+      bonus: NEW_SPECIES_BONUS,
+      zoomPunch: false,
+    });
+  }
+
+  /**
+   * Shared "big moment" cinematic beat: freezes attention on a colored flash, a camera punch,
+   * and a title card, plus a score bonus. Lion, Celestial Cat, and every other Big Cat's first
+   * discovery all use this, just recolored/retitled and (for the non-Lion/Celestial ones)
+   * lighter — see each caller for the sound it plays.
+   */
+  private playMilestoneCinematic(opts: {
+    tintColor: number;
+    textColor: string;
+    title: string;
+    subtitle?: string;
+    bonus: number;
+    zoomPunch?: boolean;
+  }) {
+    const { tintColor, textColor, title: titleStr, subtitle, bonus, zoomPunch = true } = opts;
     this.score.add(bonus);
     this.refreshScoreText();
 
@@ -1061,7 +1133,7 @@ export class GameScene extends Phaser.Scene {
     glow.setDisplaySize(GAME_WIDTH * 2.5, GAME_WIDTH * 2.5);
 
     const title = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2, titleStr, {
+      .text(GAME_WIDTH / 2, subtitle ? GAME_HEIGHT / 2 - 16 : GAME_HEIGHT / 2, titleStr, {
         fontFamily: FONT_FAMILY,
         fontSize: '22px',
         color: textColor,
@@ -1076,29 +1148,51 @@ export class GameScene extends Phaser.Scene {
       .setAlpha(0)
       .setScale(0.5);
 
+    const subtitleText = subtitle
+      ? this.add
+          .text(GAME_WIDTH / 2, title.y + 58, subtitle, {
+            fontFamily: FONT_FAMILY,
+            fontSize: '14px',
+            color: '#fdf6ec',
+            fontStyle: 'bold',
+            stroke: '#3a2b22',
+            strokeThickness: 3,
+          })
+          .setOrigin(0.5)
+          .setDepth(902)
+          .setAlpha(0)
+      : null;
+
     this.cameras.main.shake(400, 0.01);
     this.tweens.add({ targets: darken, alpha: 0.4, duration: 220, yoyo: true, hold: 250 });
     this.tweens.add({ targets: glow, alpha: 0.85, duration: 320, yoyo: true, hold: 200 });
 
-    const zoomInDuration = 450;
-    this.time.delayedCall(180, () => {
-      this.cameras.main.zoomTo(1.12, zoomInDuration, 'Sine.easeOut');
-    });
-    // Scheduled by fixed delay rather than a zoomTo completion callback — that callback fires
-    // repeatedly with a `progress` value that can skip past exactly 1 between ticks, which left
-    // the camera permanently zoomed in when the follow-up zoom-back never triggered.
-    //
-    // `force: true` matters here too: this fires at the exact millisecond the first zoom is due
-    // to finish, and Phaser's zoomTo silently no-ops if it thinks a zoom is still `isRunning` —
-    // which it can still believe for one frame at that exact boundary depending on update order.
-    // Without force, that race intermittently left the camera stuck zoomed in forever.
-    this.time.delayedCall(180 + zoomInDuration, () => {
-      this.cameras.main.zoomTo(1, 550, 'Sine.easeInOut', true);
-    });
+    if (zoomPunch) {
+      const zoomInDuration = 450;
+      this.time.delayedCall(180, () => {
+        this.cameras.main.zoomTo(1.12, zoomInDuration, 'Sine.easeOut');
+      });
+      // Scheduled by fixed delay rather than a zoomTo completion callback — that callback fires
+      // repeatedly with a `progress` value that can skip past exactly 1 between ticks, which left
+      // the camera permanently zoomed in when the follow-up zoom-back never triggered.
+      //
+      // `force: true` matters here too: this fires at the exact millisecond the first zoom is due
+      // to finish, and Phaser's zoomTo silently no-ops if it thinks a zoom is still `isRunning` —
+      // which it can still believe for one frame at that exact boundary depending on update order.
+      // Without force, that race intermittently left the camera stuck zoomed in forever.
+      this.time.delayedCall(180 + zoomInDuration, () => {
+        this.cameras.main.zoomTo(1, 550, 'Sine.easeInOut', true);
+      });
+    }
 
     this.time.delayedCall(260, () => {
       title.setAlpha(1);
       this.tweens.add({ targets: title, scale: 1, duration: 280, ease: 'Back.easeOut' });
+      if (subtitleText) {
+        this.time.delayedCall(200, () => {
+          this.tweens.add({ targets: subtitleText, alpha: 1, duration: 250 });
+        });
+      }
       this.time.delayedCall(1700, () => {
         this.tweens.add({
           targets: title,
@@ -1107,6 +1201,9 @@ export class GameScene extends Phaser.Scene {
           duration: 500,
           onComplete: () => title.destroy(),
         });
+        if (subtitleText) {
+          this.tweens.add({ targets: subtitleText, alpha: 0, y: subtitleText.y - 30, duration: 500, onComplete: () => subtitleText.destroy() });
+        }
       });
     });
 
@@ -1149,6 +1246,32 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /** A handful of small sparks radiating out from a combo popup — more of them, and further, the bigger the chain. */
+  private spawnComboSparks(x: number, y: number, combo: number) {
+    const count = Math.min(4 + combo, 10);
+    const distance = Math.min(28 + combo * 4, 60);
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.4;
+      const spark = this.add.circle(x, y, 3, 0xffd873, 0.9).setDepth(499);
+      this.tweens.add({
+        targets: spark,
+        x: x + Math.cos(angle) * distance,
+        y: y + Math.sin(angle) * distance,
+        alpha: 0,
+        scale: 0.3,
+        duration: 380,
+        ease: 'Cubic.easeOut',
+        onComplete: () => spark.destroy(),
+      });
+    }
+  }
+
+  /**
+   * The bigger the chain, the more it should announce itself: a thicker outline + drop shadow so
+   * it doesn't get lost against a busy board, a small screen shake once the chain is real (3+),
+   * a handful of sparks radiating from the merge point, and — only for the top "KINGDOM COMBO!"
+   * tier — a crown that pops in above the text.
+   */
   private showComboPopup(combo: number, x: number, y: number) {
     const text = this.add
       .text(x, y - 10, comboLabel(combo), {
@@ -1157,11 +1280,27 @@ export class GameScene extends Phaser.Scene {
         color: '#ff6f3c',
         fontStyle: 'bold',
         stroke: '#3a2b22',
-        strokeThickness: 3,
+        strokeThickness: 5,
       })
       .setOrigin(0.5)
       .setDepth(500)
-      .setScale(0.4);
+      .setScale(0.4)
+      .setShadow(2, 3, '#000000', 4, true, true);
+
+    if (combo >= 3) {
+      this.cameras.main.shake(Math.min(90 + combo * 15, 220), Math.min(0.003 + combo * 0.0007, 0.009));
+    }
+    this.spawnComboSparks(x, y, combo);
+
+    let crown: Phaser.GameObjects.Text | null = null;
+    if (combo >= MAX_COMBO_TIER) {
+      crown = this.add
+        .text(x, y - 34, '👑', { fontSize: '20px' })
+        .setOrigin(0.5)
+        .setDepth(500)
+        .setAlpha(0)
+        .setScale(0.3);
+    }
 
     // Punchy scale-in "pop", a real hold so it can actually be read, then rise-and-fade.
     this.tweens.add({
@@ -1170,14 +1309,20 @@ export class GameScene extends Phaser.Scene {
       duration: 160,
       ease: 'Back.easeOut',
       onComplete: () => {
+        if (crown) {
+          this.tweens.add({ targets: crown, alpha: 1, scale: 1, duration: 200, ease: 'Back.easeOut' });
+        }
         this.tweens.add({
-          targets: text,
-          y: y - 50,
+          targets: [text, crown].filter((t): t is Phaser.GameObjects.Text => t !== null),
+          y: '-=40',
           alpha: 0,
           duration: 600,
           delay: 550,
           ease: 'Cubic.easeOut',
-          onComplete: () => text.destroy(),
+          onComplete: () => {
+            text.destroy();
+            crown?.destroy();
+          },
         });
       },
     });
@@ -1292,6 +1437,7 @@ export class GameScene extends Phaser.Scene {
 
   private triggerGameOver() {
     this.isGameOver = true;
+    this.tweens.killTweensOf(this.dangerWarningText); // stop the heartbeat pulse if it was mid-danger
 
     const bestCat = getCatData(this.highestLevelThisRun);
     this.finalCatPortrait.setTexture(textureKeyForLevel(this.highestLevelThisRun));

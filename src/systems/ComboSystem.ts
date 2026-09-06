@@ -37,6 +37,8 @@ const COMBO_LABELS: Record<number, string> = {
   5: 'ABSOLUTE CAT-OS!',
 };
 const MAX_LABEL = 'KINGDOM COMBO!'; // 6+
+/** Combo count where the escalating label caps out — GameScene uses this to trigger the biggest flourish. */
+export const MAX_COMBO_TIER = 6;
 
 /** Escalating on-screen phrase for a given combo count (only meaningful for combo >= 2). */
 export function comboLabel(combo: number): string {

@@ -21,8 +21,8 @@ export const PANEL_RIGHT = GAME_WIDTH - FRAME_MARGIN;
 export const PANEL_TOP = HEADER_TEXT_HEIGHT;
 export const PANEL_BOTTOM = GAME_HEIGHT - FRAME_MARGIN;
 
-/** Score/Best + Purr Meter section at the top of the panel — no next-cat preview needed anymore, the hovering drop cat in the arena already shows what's coming. */
-export const STATS_BAR_HEIGHT = 60;
+/** Score/Best + Purr Meter section at the top of the panel — no next-cat preview needed anymore, the hovering drop cat in the arena already shows what's coming. Compact single-line layout (was 60) to give the arena more vertical room. */
+export const STATS_BAR_HEIGHT = 48;
 /** Where the panel's score section ends and the arena section begins. */
 export const PANEL_DIVIDER_Y = PANEL_TOP + STATS_BAR_HEIGHT;
 

@@ -4,6 +4,8 @@ export interface LifetimeStats {
   totalCatsMerged: number;
   biggestCombo: number;
   lionsCreated: number;
+  /** Merges producing a Cheetah (level 7) or bigger — the header's headline number, replacing the old Lion-only crown. */
+  bigCatsCreated: number;
   gamesPlayed: number;
 }
 
@@ -11,6 +13,7 @@ const DEFAULT_STATS: LifetimeStats = {
   totalCatsMerged: 0,
   biggestCombo: 0,
   lionsCreated: 0,
+  bigCatsCreated: 0,
   gamesPlayed: 0,
 };
 
@@ -52,6 +55,11 @@ export class StatsSystem {
 
   recordLion() {
     this.stats.lionsCreated += 1;
+    this.save();
+  }
+
+  recordBigCat() {
+    this.stats.bigCatsCreated += 1;
     this.save();
   }
 
