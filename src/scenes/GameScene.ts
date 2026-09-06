@@ -156,6 +156,13 @@ export class GameScene extends Phaser.Scene {
   private canDrop = true;
   private isGameOver = false;
 
+  // Read once at create() rather than live — a player who toggles their OS setting mid-run
+  // shouldn't have effects change out from under them mid-combo. Screen shake and the camera
+  // zoom-punch are the two effects strong enough to matter for vestibular sensitivity; particle
+  // bursts, tints, and text pops stay as-is since they carry the actual feedback (a combo, a
+  // milestone) that reduced motion is about toning down harshness, not going silent.
+  private prefersReducedMotion = false;
+
   // Game mode (see MenuScene) — 'normal' unless launched otherwise via init(data).
   private mode: GameMode = 'normal';
   private modifier: DailyModifier | null = null;
@@ -174,7 +181,18 @@ export class GameScene extends Phaser.Scene {
     this.dangerLineY = DANGER_LINE_Y + (this.modifier?.dangerLineShiftPx ?? 0);
   }
 
+  /** Routes every screen shake through the reduced-motion check in one place, rather than
+   * repeating `if (this.prefersReducedMotion) return;` at each of the 5 call sites. */
+  private shakeCamera(duration: number, intensity: number) {
+    if (this.prefersReducedMotion) {
+      return;
+    }
+    this.cameras.main.shake(duration, intensity);
+  }
+
   create() {
+    this.prefersReducedMotion =
+      typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.score.reset();
     // Fresh instances each run (restart() reuses this Scene object rather than reconstructing it,
     // so these need a hard reset the way `score` gets via .reset() — ScoreSystem keeps `best`
@@ -1318,11 +1336,11 @@ export class GameScene extends Phaser.Scene {
           .setAlpha(0)
       : null;
 
-    this.cameras.main.shake(400, 0.01);
+    this.shakeCamera(400, 0.01);
     this.tweens.add({ targets: darken, alpha: 0.4, duration: 220, yoyo: true, hold: 250 });
     this.tweens.add({ targets: glow, alpha: 0.85, duration: 320, yoyo: true, hold: 200 });
 
-    if (zoomPunch) {
+    if (zoomPunch && !this.prefersReducedMotion) {
       const zoomInDuration = 450;
       this.time.delayedCall(180, () => {
         this.cameras.main.zoomTo(1.12, zoomInDuration, 'Sine.easeOut');
@@ -1443,7 +1461,7 @@ export class GameScene extends Phaser.Scene {
       .setShadow(2, 3, '#000000', 4, true, true);
 
     if (combo >= 3) {
-      this.cameras.main.shake(Math.min(90 + combo * 15, 220), Math.min(0.003 + combo * 0.0007, 0.009));
+      this.shakeCamera(Math.min(90 + combo * 15, 220), Math.min(0.003 + combo * 0.0007, 0.009));
     }
     this.spawnComboSparks(x, y, combo);
 
@@ -1501,7 +1519,7 @@ export class GameScene extends Phaser.Scene {
 
     if (progress > 0.5 && !this.hasShakenThisDanger) {
       this.hasShakenThisDanger = true;
-      this.cameras.main.shake(150, 0.006);
+      this.shakeCamera(150, 0.006);
     }
   }
 

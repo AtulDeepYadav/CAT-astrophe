@@ -22,6 +22,10 @@ const GLOW_TEXTURE_SIZE = 160;
 export class BootScene extends Phaser.Scene {
   private loadingBarBg!: Phaser.GameObjects.Rectangle;
   private loadingBarFill!: Phaser.GameObjects.Rectangle;
+  /** Keys of any files the loader couldn't fetch (dropped connection mid-load, a 404, etc.) —
+   * checked once loading finishes so a partial failure shows a real retry screen instead of
+   * silently limping into the menu with missing textures/audio. */
+  private failedFileKeys: string[] = [];
 
   constructor() {
     super('Boot');
@@ -31,6 +35,9 @@ export class BootScene extends Phaser.Scene {
     this.buildLoadingBar();
     this.load.on('progress', (value: number) => {
       this.loadingBarFill.width = 200 * value;
+    });
+    this.load.on('loaderror', (file: { key: string }) => {
+      this.failedFileKeys.push(file.key);
     });
 
     for (const cat of CAT_LEVELS) {
@@ -65,6 +72,12 @@ export class BootScene extends Phaser.Scene {
   async create() {
     this.loadingBarBg.destroy();
     this.loadingBarFill.destroy();
+
+    if (this.failedFileKeys.length > 0) {
+      this.showLoadErrorScreen();
+      return;
+    }
+
     this.buildGoldenGlowTexture();
     // Phaser bakes Text objects to a texture at creation time — starting the Game scene before
     // the webfont resolves would freeze every label onto the system fallback font permanently,
@@ -72,6 +85,48 @@ export class BootScene extends Phaser.Scene {
     // block the game from starting at all.
     await Promise.race([this.waitForFont(), new Promise((resolve) => this.time.delayedCall(2500, resolve))]);
     this.scene.start('Menu');
+  }
+
+  /** A dropped connection partway through loading ~90 image/audio files used to just leave the
+   * loading bar frozen forever with no explanation — this gives the player something to act on.
+   * A full page reload (not just re-running this scene) is the simplest reliable way to retry:
+   * Phaser's own loader doesn't cleanly support re-queuing just the files that failed. */
+  private showLoadErrorScreen() {
+    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x2b2018, 1).setOrigin(0, 0);
+
+    this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 50, "Couldn't load everything", {
+        fontFamily: FONT_FAMILY,
+        fontSize: '20px',
+        fontStyle: '700',
+        color: '#fff6e8',
+        align: 'center',
+        wordWrap: { width: GAME_WIDTH - 60 },
+      })
+      .setOrigin(0.5);
+
+    this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 10, 'Check your connection and try again.', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '14px',
+        color: '#d8c7ae',
+        align: 'center',
+        wordWrap: { width: GAME_WIDTH - 60 },
+      })
+      .setOrigin(0.5);
+
+    const retryButton = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 50, 'Retry', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '18px',
+        fontStyle: '700',
+        color: '#3a2b22',
+        backgroundColor: '#ffd873',
+        padding: { x: 28, y: 12 },
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    retryButton.on('pointerdown', () => window.location.reload());
   }
 
   private async waitForFont() {
