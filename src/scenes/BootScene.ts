@@ -34,13 +34,16 @@ export class BootScene extends Phaser.Scene {
     });
 
     for (const cat of CAT_LEVELS) {
-      this.load.image(textureKeyForLevel(cat.level), `assets/sprites/cats/cat-${cat.level}.png`);
-      this.load.image(silhouetteTextureKeyForLevel(cat.level), `assets/sprites/cats/cat-${cat.level}-silhouette.png`);
+      this.load.image(textureKeyForLevel(cat.level), `assets/sprites/cats/cat-${cat.level}.webp`);
+      this.load.image(
+        silhouetteTextureKeyForLevel(cat.level),
+        `assets/sprites/cats/cat-${cat.level}-silhouette.webp`,
+      );
 
       for (const frame of framesForLevel(cat.level)) {
         this.load.image(
           animFrameTextureKey(cat.level, frame),
-          `assets/sprites/cats/anim/cat-${cat.level}-${frame}.png`,
+          `assets/sprites/cats/anim/cat-${cat.level}-${frame}.webp`,
         );
       }
 
