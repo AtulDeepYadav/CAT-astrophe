@@ -21,6 +21,11 @@ export class MenuScene extends Phaser.Scene {
   private settings = new SettingsSystem();
   private muteButton!: Phaser.GameObjects.Text;
 
+  // Mirrors GameScene's own modal/back-button bookkeeping (see its pushModalHistoryEntry doc
+  // comment) so the Android back gesture closes the Leaderboard overlay instead of leaving the
+  // app — a history entry is pushed only for the outermost modal open, and consumed on close.
+  private modalHistoryDepth = 0;
+
   constructor() {
     super('Menu');
   }
@@ -29,6 +34,13 @@ export class MenuScene extends Phaser.Scene {
     const score = new ScoreSystem();
     const daily = new DailyChallengeSystem();
     const modifier = todaysModifier();
+
+    this.modalHistoryDepth = 0;
+    // Removed first — scene.start('Menu') reuses this Scene object rather than reconstructing
+    // it, so without this a return trip to Menu would register a second listener on top of the
+    // first and a single back-press would fire the handler twice.
+    window.removeEventListener('popstate', this.handleBackButton);
+    window.addEventListener('popstate', this.handleBackButton);
 
     this.add.image(0, 0, backgroundFrameTextureKey('home', 1)).setOrigin(0, 0);
     this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1008, 0.45).setOrigin(0, 0);
@@ -216,9 +228,37 @@ export class MenuScene extends Phaser.Scene {
     });
   }
 
-  private toggleLeaderboard(visible: boolean) {
+  private toggleLeaderboard(visible: boolean, fromBackButton = false) {
     this.leaderboardContainer.setVisible(visible);
+    if (visible) {
+      this.pushModalHistoryEntry();
+    } else if (!fromBackButton) {
+      this.consumeModalHistoryEntry();
+    }
   }
+
+  private pushModalHistoryEntry() {
+    if (this.modalHistoryDepth === 0) {
+      window.history.pushState({ catAstropheModal: true }, '');
+    }
+    this.modalHistoryDepth += 1;
+  }
+
+  private consumeModalHistoryEntry() {
+    if (this.modalHistoryDepth === 0) return;
+    this.modalHistoryDepth -= 1;
+    if (this.modalHistoryDepth === 0) {
+      window.history.back();
+    }
+  }
+
+  private handleBackButton = () => {
+    if (!this.scene.isActive()) return;
+    if (this.leaderboardContainer?.visible) {
+      this.toggleLeaderboard(false, true);
+    }
+    this.modalHistoryDepth = 0;
+  };
 
   private buildLeaderboardOverlay(): Phaser.GameObjects.Container {
     const bg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.75).setOrigin(0, 0);

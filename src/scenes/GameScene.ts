@@ -137,6 +137,10 @@ export class GameScene extends Phaser.Scene {
   private settings!: SettingsSystem;
   private onboarding!: OnboardingSystem;
   private onboardingContainer!: Phaser.GameObjects.Container;
+  /** How many of this scene's modals currently "own" the one pushState history entry — see
+   * pushModalHistoryEntry/handleBackButton. Only ever 0 or 1 today (every modal here is mutually
+   * exclusive), kept as a counter rather than a boolean so that stays true even if that changes. */
+  private modalHistoryDepth = 0;
 
   private dropPreviewImage!: Phaser.GameObjects.Image;
   private dropPreviewGlow!: Phaser.GameObjects.Image;
@@ -210,6 +214,11 @@ export class GameScene extends Phaser.Scene {
     this.prefersReducedMotion =
       typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     this.isPaused = false;
+    this.modalHistoryDepth = 0;
+    // Removed first — restart()/scene.start() reuse this Scene object rather than reconstructing
+    // it, so without this a second create() would register a second listener on top of the first.
+    window.removeEventListener('popstate', this.handleBackButton);
+    window.addEventListener('popstate', this.handleBackButton);
     this.settings = new SettingsSystem();
     this.leaderboard = new LeaderboardSystem();
     this.dailyChallenge = new DailyChallengeSystem();
@@ -334,7 +343,11 @@ export class GameScene extends Phaser.Scene {
     this.pauseContainer = this.buildPauseOverlay();
     this.onboarding = new OnboardingSystem();
     this.onboardingContainer = this.buildOnboardingOverlay();
-    this.onboardingContainer.setVisible(!this.onboarding.hasSeenIntro);
+    const showOnboarding = !this.onboarding.hasSeenIntro;
+    this.onboardingContainer.setVisible(showOnboarding);
+    if (showOnboarding) {
+      this.pushModalHistoryEntry();
+    }
 
     registerMergeSystem(this.matter.world, {
       onMerge: ({ newLevel, x, y, isGolden }) => {
@@ -883,13 +896,70 @@ export class GameScene extends Phaser.Scene {
     this.isPaused = true;
     this.matter.world.pause();
     this.pauseContainer.setVisible(true);
+    this.pushModalHistoryEntry();
   }
 
-  private closePause() {
+  /** `fromBackButton` skips the history.back() call — popstate already consumed the entry, and
+   * calling back() again here would eat the *next* one down the stack instead. */
+  private closePause(fromBackButton = false) {
     this.isPaused = false;
     this.matter.world.resume();
     this.pauseContainer.setVisible(false);
+    if (!fromBackButton) {
+      this.consumeModalHistoryEntry();
+    }
   }
+
+  private dismissOnboarding(fromBackButton = false) {
+    this.onboarding.markSeen();
+    this.onboardingContainer.setVisible(false);
+    if (!fromBackButton) {
+      this.consumeModalHistoryEntry();
+    }
+  }
+
+  /**
+   * Android back button/gesture support. Once this runs inside a WebView (TWA/Capacitor) instead
+   * of a browser tab, back has no browser chrome to fall into — with zero history entries of our
+   * own, it would just exit the app immediately regardless of whether a modal is open, which is
+   * jarring mid-pause or mid-Collection-Book. Pushing one dummy history entry per open modal (and
+   * consuming it however the modal closes, whether via its own button or a back-press) means back
+   * closes whatever's open first, and only exits once nothing is — the same as any native app's
+   * modal-then-exit back stack, and it costs nothing in a plain browser tab either.
+   */
+  private pushModalHistoryEntry() {
+    if (this.modalHistoryDepth === 0) {
+      window.history.pushState({ catAstropheModal: true }, '');
+    }
+    this.modalHistoryDepth += 1;
+  }
+
+  private consumeModalHistoryEntry() {
+    if (this.modalHistoryDepth === 0) {
+      return;
+    }
+    this.modalHistoryDepth -= 1;
+    if (this.modalHistoryDepth === 0) {
+      window.history.back();
+    }
+  }
+
+  private handleBackButton = () => {
+    // This scene stays alive (Phaser reuses it across restart()/scene.start() elsewhere) even
+    // once Menu is showing instead — without this guard, a back-press on the menu would also run
+    // GameScene's checks, harmlessly but pointlessly since nothing here is visible from Menu.
+    if (!this.scene.isActive()) {
+      return;
+    }
+    if (this.onboardingContainer?.visible) {
+      this.dismissOnboarding(true);
+    } else if (this.pauseContainer?.visible) {
+      this.closePause(true);
+    } else if (this.collectionBookContainer?.visible) {
+      this.closeCollectionBook(true);
+    }
+    this.modalHistoryDepth = 0;
+  };
 
   private toggleMute() {
     const nextMuted = !this.settings.muted;
@@ -1003,8 +1073,7 @@ export class GameScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     gotItButton.on('pointerdown', (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
       event.stopPropagation();
-      this.onboarding.markSeen();
-      this.onboardingContainer.setVisible(false);
+      this.dismissOnboarding();
     });
 
     const container = this.add.container(0, 0, [overlayBg, title, ...tipTexts, gotItButton]);
@@ -1252,12 +1321,16 @@ export class GameScene extends Phaser.Scene {
 
     this.setCollectionBookTab('cats');
     this.collectionBookContainer.setVisible(true);
+    this.pushModalHistoryEntry();
   }
 
-  private closeCollectionBook() {
+  private closeCollectionBook(fromBackButton = false) {
     this.collectionBookContainer.setVisible(false);
     // The drop preview's golden glow reflects whatever cosmetic is now selected.
     this.updateDropPreview();
+    if (!fromBackButton) {
+      this.consumeModalHistoryEntry();
+    }
   }
 
   private setCollectionBookTab(tab: CollectionBookTab) {
