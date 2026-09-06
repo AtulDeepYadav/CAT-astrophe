@@ -139,7 +139,7 @@ export class BootScene extends Phaser.Scene {
 
   private async waitForFont() {
     try {
-      await document.fonts.load('700 32px "Baloo 2"');
+      await Promise.all([document.fonts.load('700 32px "Baloo 2"'), document.fonts.load('700 16px "Nunito"')]);
       await document.fonts.ready;
     } catch {
       // Web Font Loading API can be unavailable/unreliable in some contexts (older browsers,

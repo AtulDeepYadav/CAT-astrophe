@@ -58,3 +58,12 @@ export const MATTER_CONFIG = {
  * the webfont hasn't finished loading somehow; BootScene waits on it before building any UI text.
  */
 export const FONT_FAMILY = '"Baloo 2", "Comic Sans MS", sans-serif';
+
+/**
+ * Clean, geometric-rounded body/UI face — everything from HUD labels down to toast text used
+ * FONT_FAMILY (Baloo 2, a heavy display face) at every size before this, including 12-13px body
+ * copy, which is a big part of why the UI read as one flat, undifferentiated block of text with
+ * no hierarchy. Baloo 2 stays reserved for headlines, big scores, and button labels; this is for
+ * everything smaller/quieter than that.
+ */
+export const UI_FONT_FAMILY = '"Nunito", "Baloo 2", "Comic Sans MS", sans-serif';

@@ -14,6 +14,7 @@ import { exportSaveData, importSaveData } from '../systems/saveBackup';
 import { getCatData, portraitTextureKeyForLevel } from '../config/catData';
 import { shareViaWebShare } from '../systems/socialShare';
 import { ensureAmbientMusic } from '../systems/MusicSystem';
+import { THEME, bodyTextStyle, createButton, createIconButton, createPanel } from '../ui/uiKit';
 
 /**
  * Title screen — the game used to boot straight into a live round with no beat before the
@@ -25,7 +26,7 @@ import { ensureAmbientMusic } from '../systems/MusicSystem';
 export class MenuScene extends Phaser.Scene {
   private leaderboardContainer!: Phaser.GameObjects.Container;
   private settings = new SettingsSystem();
-  private muteButton!: Phaser.GameObjects.Text;
+  private muteIcon!: { container: Phaser.GameObjects.Container; setIcon: (n: 'speakerOn' | 'speakerOff') => void };
 
   // Mirrors GameScene's own modal/back-button bookkeeping (see its pushModalHistoryEntry doc
   // comment) so the Android back gesture closes the Leaderboard overlay instead of leaving the
@@ -50,55 +51,72 @@ export class MenuScene extends Phaser.Scene {
     window.addEventListener('popstate', this.handleBackButton);
 
     this.add.image(0, 0, backgroundFrameTextureKey('home', 1)).setOrigin(0, 0);
-    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1008, 0.45).setOrigin(0, 0);
+    this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1008, 0.4).setOrigin(0, 0);
+    // A soft vertical gradient wash behind the title/buttons column — grounds that whole stack
+    // against the busy illustrated room behind it without hiding the art, the way a frosted panel
+    // would but without a hard-edged rectangle.
+    const wash = this.add.graphics();
+    wash.fillGradientStyle(0x1a1008, 0x1a1008, 0x1a1008, 0x1a1008, 0.55, 0.55, 0, 0);
+    wash.fillRect(0, 0, GAME_WIDTH, 520);
 
     ensureAmbientMusic(this);
 
     // Mute toggle, top-right — so a player can silence the game before ever tapping Play, not
     // only from inside a run's pause menu.
-    this.muteButton = this.add
-      .text(GAME_WIDTH - 32, 32, this.settings.muted ? '🔇' : '🔊', {
-        fontSize: '22px',
-        stroke: '#3a2b22',
-        strokeThickness: 4,
-      })
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true });
-    this.muteButton.on('pointerdown', () => {
-      const nextMuted = !this.settings.muted;
-      this.settings.setMuted(nextMuted);
-      this.muteButton.setText(nextMuted ? '🔇' : '🔊');
+    this.muteIcon = createIconButton(this, GAME_WIDTH - 34, 34, this.settings.muted ? 'speakerOff' : 'speakerOn', {
+      radius: 19,
+      depth: 50,
+      onTap: () => {
+        const nextMuted = !this.settings.muted;
+        this.settings.setMuted(nextMuted);
+        this.muteIcon.setIcon(nextMuted ? 'speakerOff' : 'speakerOn');
+      },
     });
 
     this.add
-      .text(GAME_WIDTH / 2, 110, '🐱 Cat-astrophe', {
+      .text(GAME_WIDTH / 2, 108, '🐱 Cat-astrophe', {
         fontFamily: FONT_FAMILY,
-        fontSize: '38px',
+        fontSize: '40px',
         fontStyle: '800',
         color: '#fff6e8',
-        stroke: '#3a2b22',
-        strokeThickness: 6,
+        stroke: '#4a2c0d',
+        strokeThickness: 4,
       })
-      .setOrigin(0.5);
+      .setOrigin(0.5)
+      .setShadow(0, 5, 'rgba(20,12,4,0.45)', 8, false, true);
 
-    this.add
-      .text(GAME_WIDTH / 2, 160, `Best score: ${score.best}   🐟 ${currency.balance}`, {
-        fontFamily: FONT_FAMILY,
-        fontSize: '16px',
-        color: '#fff6e8',
-      })
-      .setOrigin(0.5);
+    this.buildStatChips(score.best, currency.balance);
 
-    this.buildMenuButton(GAME_WIDTH / 2, 280, '▶  Play', '#ffd873', () => this.startGame('normal'));
+    createButton(this, GAME_WIDTH / 2, 280, '▶  Play', THEME.primary, {
+      fontSize: 21,
+      minWidth: 220,
+      depth: 10,
+      onTap: () => this.onMenuButtonTap(() => this.startGame('normal')),
+    });
 
     const dailyLabel = daily.playedToday
       ? `📅 Daily: ${modifier.name}  (best ${daily.bestScoreToday})`
       : `📅 Daily: ${modifier.name}`;
-    this.buildMenuButton(GAME_WIDTH / 2, 350, dailyLabel, '#a7d8ff', () => this.startGame('daily'), 15);
+    createButton(this, GAME_WIDTH / 2, 350, dailyLabel, THEME.info, {
+      fontSize: 15,
+      minWidth: 220,
+      depth: 10,
+      onTap: () => this.onMenuButtonTap(() => this.startGame('daily')),
+    });
 
-    this.buildMenuButton(GAME_WIDTH / 2, 420, '🌙  Zen Mode', '#c9b6f0', () => this.startGame('zen'));
+    createButton(this, GAME_WIDTH / 2, 420, '🌙  Zen Mode', THEME.calm, {
+      fontSize: 19,
+      minWidth: 220,
+      depth: 10,
+      onTap: () => this.onMenuButtonTap(() => this.startGame('zen')),
+    });
 
-    this.buildMenuButton(GAME_WIDTH / 2, 490, '🏆  Leaderboard', '#ffe6a7', () => this.toggleLeaderboard(true));
+    createButton(this, GAME_WIDTH / 2, 490, '🏆  Leaderboard', THEME.gold, {
+      fontSize: 19,
+      minWidth: 220,
+      depth: 10,
+      onTap: () => this.onMenuButtonTap(() => this.toggleLeaderboard(true)),
+    });
 
     this.buildHeroShowcase();
 
@@ -106,21 +124,18 @@ export class MenuScene extends Phaser.Scene {
     // don't compete with Play/Daily/Zen/Leaderboard — this is a stopgap for real cloud save
     // (needs the native wrapping this project hasn't done yet), not a headline feature.
     const backupLink = this.add
-      .text(GAME_WIDTH / 2 - 70, GAME_HEIGHT - 85, '💾 Backup', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '13px',
-        color: '#f2e6d3',
-      })
+      .text(GAME_WIDTH / 2 - 70, GAME_HEIGHT - 85, '💾 Backup', bodyTextStyle({ fontSize: '13px', color: '#f2e6d3' }))
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
     backupLink.on('pointerdown', () => this.backupProgress());
 
     const restoreLink = this.add
-      .text(GAME_WIDTH / 2 + 70, GAME_HEIGHT - 85, '📥 Restore', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '13px',
-        color: '#f2e6d3',
-      })
+      .text(
+        GAME_WIDTH / 2 + 70,
+        GAME_HEIGHT - 85,
+        '📥 Restore',
+        bodyTextStyle({ fontSize: '13px', color: '#f2e6d3' }),
+      )
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
     restoreLink.on('pointerdown', () => this.restoreProgress());
@@ -129,24 +144,62 @@ export class MenuScene extends Phaser.Scene {
     // needs to be reachable from inside the app too. Opens in a new tab so the running game
     // (and anything mid-round) isn't disrupted by navigating away from it.
     const privacyLink = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 60, 'Privacy Policy', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '12px',
-        color: '#b8a98f',
-      })
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 60, 'Privacy Policy', bodyTextStyle({ fontSize: '12px', color: '#b8a98f' }))
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
     privacyLink.on('pointerdown', () => window.open('/privacy.html', '_blank', 'noopener'));
 
     this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 40, 'Drop cats. Merge cats. Try not to cat-astrophe.', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '13px',
-        color: '#f2e6d3',
-      })
+      .text(
+        GAME_WIDTH / 2,
+        GAME_HEIGHT - 40,
+        'Drop cats. Merge cats. Try not to cat-astrophe.',
+        bodyTextStyle({ fontSize: '13px', color: '#f2e6d3' }),
+      )
       .setOrigin(0.5);
 
     this.leaderboardContainer = this.buildLeaderboardOverlay();
+  }
+
+  /** Two small side-by-side "stat chip" pills (Best Score, Fish) rather than one plain line of
+   * text — reads as a mini dashboard instead of a caption, and gives the Fish balance its own
+   * visual weight now that it's a real spendable currency. */
+  private buildStatChips(best: number, fish: number) {
+    const y = 158;
+    const chipH = 30;
+    const gap = 10;
+
+    const makeChip = (label: string, cx: number): number => {
+      const text = this.add
+        .text(0, 0, label, bodyTextStyle({ fontSize: '14px', fontStyle: '700', color: '#4a2c0d' }))
+        .setOrigin(0.5);
+      const w = text.width + 26;
+      const bg = this.add.graphics();
+      bg.fillStyle(0xfff6e8, 0.92);
+      bg.fillRoundedRect(-w / 2, -chipH / 2, w, chipH, chipH / 2);
+      bg.lineStyle(1.5, 0xb69c73, 0.8);
+      bg.strokeRoundedRect(-w / 2 + 0.75, -chipH / 2 + 0.75, w - 1.5, chipH - 1.5, chipH / 2 - 0.75);
+      this.add.container(cx, y, [bg, text]);
+      return w;
+    };
+
+    const bestLabel = `🏅 ${best}`;
+    const fishLabel = `🐟 ${fish}`;
+    // Measure both first (off-screen trick isn't needed — text width is known immediately after
+    // creation) so the pair can be centered as a unit rather than guessing a fixed offset.
+    const probeBest = this.add.text(0, 0, bestLabel, { fontSize: '14px', fontStyle: '700' }).setVisible(false);
+    const probeFish = this.add.text(0, 0, fishLabel, { fontSize: '14px', fontStyle: '700' }).setVisible(false);
+    const wBest = probeBest.width + 26;
+    const wFish = probeFish.width + 26;
+    probeBest.destroy();
+    probeFish.destroy();
+
+    const totalW = wBest + gap + wFish;
+    const leftX = GAME_WIDTH / 2 - totalW / 2 + wBest / 2;
+    const rightX = GAME_WIDTH / 2 + totalW / 2 - wFish / 2;
+
+    makeChip(bestLabel, leftX);
+    makeChip(fishLabel, rightX);
   }
 
   /** Copies a portable backup code to the clipboard — see saveBackup.ts for why this exists
@@ -182,15 +235,19 @@ export class MenuScene extends Phaser.Scene {
 
   private showToast(message: string) {
     const toast = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 100, message, {
-        fontFamily: FONT_FAMILY,
-        fontSize: '13px',
-        color: '#fff6e8',
-        backgroundColor: '#3a2b22',
-        padding: { x: 12, y: 6 },
-        align: 'center',
-        wordWrap: { width: GAME_WIDTH - 60 },
-      })
+      .text(
+        GAME_WIDTH / 2,
+        GAME_HEIGHT - 100,
+        message,
+        bodyTextStyle({
+          fontSize: '13px',
+          color: '#fff6e8',
+          backgroundColor: '#3a2b22',
+          padding: { x: 12, y: 6 },
+          align: 'center',
+          wordWrap: { width: GAME_WIDTH - 60 },
+        }),
+      )
       .setOrigin(0.5)
       .setAlpha(0);
 
@@ -208,6 +265,16 @@ export class MenuScene extends Phaser.Scene {
     this.scene.start('Game', { mode });
   }
 
+  /** Guards every top-level menu button the same way — a tap that lands on one of these while the
+   * Leaderboard overlay is open (createButton has no notion of scene-specific overlay state on
+   * its own) is a no-op rather than starting a run or re-opening the overlay out from under it. */
+  private onMenuButtonTap(action: () => void) {
+    if (this.leaderboardContainer?.visible) {
+      return;
+    }
+    action();
+  }
+
   /**
    * Shows off the player's own best-ever cat in the open space below the menu buttons — the
    * title screen used to be just a logo and a button stack with no personality of its own, and
@@ -223,21 +290,26 @@ export class MenuScene extends Phaser.Scene {
     const centerY = 630;
     const targetHeight = 190;
 
+    // A soft glass "shelf" behind the portrait — grounds it against the busy room art the same
+    // way the wash does for the button column above, so the showcase reads as one designed unit.
+    createPanel(this, centerX, centerY, 260, 250, { radius: 32, fill: 0xfff6e8, fillAlpha: 0.16, depth: 0 });
+
     const portrait = this.add.image(centerX, centerY, portraitTextureKeyForLevel(heroLevel));
     const scale = targetHeight / portrait.height;
     portrait.setScale(scale * 0.5).setAlpha(0);
+    portrait.setDepth(1);
 
     const caption = this.add
-      .text(centerX, centerY + targetHeight / 2 + 22, `Your best: ${heroData.name}`, {
-        fontFamily: FONT_FAMILY,
-        fontSize: '14px',
-        fontStyle: '700',
-        color: '#fff6e8',
-        stroke: '#3a2b22',
-        strokeThickness: 4,
-      })
+      .text(
+        centerX,
+        centerY + targetHeight / 2 + 22,
+        `Your best: ${heroData.name}`,
+        bodyTextStyle({ fontSize: '14px', fontStyle: '700', color: '#fff6e8' }),
+      )
       .setOrigin(0.5)
-      .setAlpha(0);
+      .setAlpha(0)
+      .setShadow(0, 2, 'rgba(0,0,0,0.5)', 3, false, true)
+      .setDepth(1);
 
     // A bounce-in entrance rather than just appearing — the one bit of "ta-da" this screen gets,
     // since it's the first thing a player sees every single session.
@@ -263,37 +335,6 @@ export class MenuScene extends Phaser.Scene {
       },
     });
     this.tweens.add({ targets: caption, alpha: 1, duration: 400, delay: 500 });
-  }
-
-  private buildMenuButton(
-    x: number,
-    y: number,
-    label: string,
-    color: string,
-    onTap: () => void,
-    fontSize = 19,
-  ) {
-    const button = this.add
-      .text(x, y, label, {
-        fontFamily: FONT_FAMILY,
-        fontSize: `${fontSize}px`,
-        fontStyle: '700',
-        color: '#3a2b22',
-        backgroundColor: color,
-        padding: { x: 26, y: 12 },
-      })
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true });
-
-    // Guard rather than an interactive full-screen rect on the leaderboard overlay to swallow
-    // taps — the same pattern GameScene's own overlays use (see collectionBookContainer.visible
-    // checks) to stop a tap on the modal from also hitting whatever's underneath it.
-    button.on('pointerdown', () => {
-      if (this.leaderboardContainer.visible) {
-        return;
-      }
-      onTap();
-    });
   }
 
   private toggleLeaderboard(visible: boolean, fromBackButton = false) {
@@ -329,12 +370,14 @@ export class MenuScene extends Phaser.Scene {
   };
 
   private buildLeaderboardOverlay(): Phaser.GameObjects.Container {
+    const centerX = GAME_WIDTH / 2;
+    const centerY = GAME_HEIGHT / 2;
     const bg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.75).setOrigin(0, 0);
 
-    const panel = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, 360, 460, 0xfff6e8).setStrokeStyle(3, 0xb8860b);
+    const panel = createPanel(this, centerX, centerY, 340, 470, { radius: 28 });
 
     const title = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 205, '🏆 Top Runs', {
+      .text(centerX, centerY - 208, '🏆 Top Runs', {
         fontFamily: FONT_FAMILY,
         fontSize: '22px',
         fontStyle: '800',
@@ -344,57 +387,78 @@ export class MenuScene extends Phaser.Scene {
 
     const entries = new LeaderboardSystem().getTop();
 
-    // Top-right of the panel, next to the title, rather than in the row list below — that list's
-    // length varies with how many runs exist, but this button's position shouldn't move around
-    // depending on it. Shares the player's own #1 run as a brag, same shape as GameScene's own
-    // Share Score — there's no real global leaderboard to share *to* yet (see the local-only note
-    // in LeaderboardSystem), just this player's own best.
-    const shareButton = this.add
-      .text(GAME_WIDTH / 2 + 145, GAME_HEIGHT / 2 - 205, '📤', { fontSize: '20px' })
+    // Top-right corner icon rather than a bottom text button — matches how every modern modal
+    // dismisses (X in the corner), and frees the bottom of the panel entirely.
+    const closeIcon = createIconButton(this, centerX + 148, centerY - 208, 'close', {
+      radius: 16,
+      theme: 'light',
+      onTap: () => this.toggleLeaderboard(false),
+    });
+
+    // Shares the player's own #1 run as a brag — there's no real global leaderboard to share *to*
+    // yet (see the local-only note in LeaderboardSystem), just this player's own best.
+    const shareIcon = this.add
+      .text(centerX + 100, centerY - 208, '📤', { fontSize: '19px' })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
-    shareButton.on('pointerdown', () => this.shareLeaderboardBest(entries));
-    const rows: Phaser.GameObjects.Text[] = [];
+    shareIcon.on('pointerdown', () => this.shareLeaderboardBest(entries));
+
+    const rows: Phaser.GameObjects.GameObject[] = [];
     if (entries.length === 0) {
       rows.push(
         this.add
-          .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 40, 'No runs yet — play a round!', {
-            fontFamily: FONT_FAMILY,
-            fontSize: '15px',
-            color: '#6f6152',
-          })
+          .text(
+            centerX,
+            centerY - 30,
+            'No runs yet — play a round!',
+            bodyTextStyle({ fontSize: '15px', color: '#6f6152' }),
+          )
           .setOrigin(0.5),
       );
     } else {
+      const rankColors = [0xffe6a0, 0xe8e8e8, 0xe0b088]; // gold/silver/bronze row tint for the top 3
       entries.forEach((entry, i) => {
+        const rowY = centerY - 155 + i * 38;
+        const rowW = 296;
+        const rowH = 32;
+        const rowBg = this.add.graphics();
+        rowBg.fillStyle(i < 3 ? rankColors[i] : 0xf3ead8, i < 3 ? 0.85 : 0.6);
+        rowBg.fillRoundedRect(centerX - rowW / 2, rowY - rowH / 2, rowW, rowH, 12);
+        rows.push(rowBg);
+
+        const badge = this.add.graphics();
+        badge.fillStyle(i < 3 ? rankColors[i] : 0xd9c8a8, 1);
+        badge.fillCircle(centerX - rowW / 2 + 20, rowY, 13);
+        badge.lineStyle(1.5, 0xb8860b, i < 3 ? 0.9 : 0.4);
+        badge.strokeCircle(centerX - rowW / 2 + 20, rowY, 13);
+        rows.push(badge);
+
+        rows.push(
+          this.add
+            .text(centerX - rowW / 2 + 20, rowY, `${i + 1}`, {
+              fontFamily: FONT_FAMILY,
+              fontSize: '13px',
+              fontStyle: '800',
+              color: '#3a2b22',
+            })
+            .setOrigin(0.5),
+        );
+
         const modeTag = entry.mode === 'daily' ? ' (daily)' : '';
         rows.push(
           this.add
             .text(
-              GAME_WIDTH / 2,
-              GAME_HEIGHT / 2 - 160 + i * 34,
-              `${i + 1}. ${entry.score} — ${entry.catName}${modeTag}`,
-              { fontFamily: FONT_FAMILY, fontSize: '15px', color: '#3a2b22' },
+              centerX - rowW / 2 + 42,
+              rowY,
+              `${entry.score} — ${entry.catName}${modeTag}`,
+              bodyTextStyle({ fontSize: '14px', fontStyle: '700', color: '#3a2b22' }),
             )
-            .setOrigin(0.5),
+            .setOrigin(0, 0.5),
         );
       });
     }
 
-    const closeButton = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 205, 'Close', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '16px',
-        fontStyle: '700',
-        color: '#3a2b22',
-        backgroundColor: '#ffd873',
-        padding: { x: 20, y: 8 },
-      })
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true });
-    closeButton.on('pointerdown', () => this.toggleLeaderboard(false));
-
-    const container = this.add.container(0, 0, [bg, panel, title, shareButton, ...rows, closeButton]);
+    const container = this.add.container(0, 0, [bg, panel, title, closeIcon.container, shareIcon, ...rows]);
     container.setDepth(1000);
     container.setVisible(false);
     return container;

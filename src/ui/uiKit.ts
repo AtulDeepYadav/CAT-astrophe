@@ -1,0 +1,358 @@
+import Phaser from 'phaser';
+import { FONT_FAMILY, UI_FONT_FAMILY } from '../config/gameConfig';
+
+/**
+ * Shared building blocks for every button/panel/icon in the game — introduced in one pass to
+ * replace flat, hard-cornered `add.text({backgroundColor})` buttons and plain-fill
+ * `add.rectangle()` panels everywhere (Menu, HUD, pause, Game Over, Collection Book, Leaderboard)
+ * with a consistent rounded, gradient, soft-shadowed look plus real press feedback. That flat
+ * single-color-rectangle-with-a-hard-corner look, repeated identically on every single button
+ * with no depth or hierarchy anywhere, was the single biggest thing making the whole app read as
+ * a decade-old prototype rather than a 2026 casual game — this file is the fix, applied once here
+ * and then used everywhere instead of hand-rolling a new flat rectangle per screen.
+ */
+
+export interface ButtonTheme {
+  /** Gradient runs light (top) to this (bottom) — a believable "lit from above" surface instead
+   * of a flat fill. */
+  top: number;
+  bottom: number;
+  border: number;
+  textColor: string;
+}
+
+/** One theme per semantic role, reused across every screen instead of each screen picking its
+ * own ad hoc hex value — this is what makes "the blue button" and "the gold button" mean the same
+ * thing everywhere in the app. */
+export const THEME = {
+  primary: { top: 0xffe9ab, bottom: 0xffb632, border: 0xc97f10, textColor: '#4a2c0d' } as ButtonTheme,
+  info: { top: 0xc9edff, bottom: 0x74c6f2, border: 0x2f83ad, textColor: '#0e3a52' } as ButtonTheme,
+  calm: { top: 0xecdcff, bottom: 0xc196f5, border: 0x7d47b8, textColor: '#3a1a5c' } as ButtonTheme,
+  gold: { top: 0xfff2c4, bottom: 0xffcf4d, border: 0xb8860b, textColor: '#4a2c0d' } as ButtonTheme,
+  neutral: { top: 0xfff8ec, bottom: 0xe9d9bc, border: 0xb69c73, textColor: '#3a2b22' } as ButtonTheme,
+  danger: { top: 0xffd3c4, bottom: 0xf58a68, border: 0xb84a26, textColor: '#4a1a0d' } as ButtonTheme,
+  dark: { top: 0x4a3d30, bottom: 0x2b2018, border: 0x1a130d, textColor: '#fff6e8' } as ButtonTheme,
+};
+
+export interface ButtonOptions {
+  fontSize?: number;
+  paddingX?: number;
+  paddingY?: number;
+  minWidth?: number;
+  /** Corner radius, capped to half the button's own height so it never exceeds a pill. */
+  radius?: number;
+  depth?: number;
+  onTap?: () => void;
+}
+
+/**
+ * A rounded, gradient-filled, drop-shadowed button sized to fit its own label — press feedback
+ * (scale + shadow compression) built in. Returns the container plus its label Text (for callers
+ * that need to update the text later, e.g. a daily-challenge button whose label changes).
+ */
+export function createButton(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  label: string,
+  theme: ButtonTheme,
+  options: ButtonOptions = {},
+): { container: Phaser.GameObjects.Container; text: Phaser.GameObjects.Text; setLabel: (s: string) => void } {
+  const fontSize = options.fontSize ?? 19;
+  const paddingX = options.paddingX ?? 28;
+  const paddingY = options.paddingY ?? 14;
+
+  const text = scene.add
+    .text(0, 1, label, {
+      fontFamily: FONT_FAMILY,
+      fontSize: `${fontSize}px`,
+      fontStyle: '700',
+      color: theme.textColor,
+    })
+    .setOrigin(0.5)
+    .setShadow(0, 2, 'rgba(0,0,0,0.18)', 0, false, true);
+
+  const w = Math.max(options.minWidth ?? 0, text.width + paddingX * 2);
+  const h = text.height + paddingY * 2;
+  const radius = Math.min(options.radius ?? 18, h / 2);
+
+  const shadow = scene.add.graphics();
+  shadow.fillStyle(0x1a0f06, 0.25);
+  shadow.fillRoundedRect(-w / 2, -h / 2 + 5, w, h, radius);
+
+  const bg = scene.add.graphics();
+  drawButtonFace(bg, w, h, radius, theme);
+
+  const container = scene.add.container(x, y, [shadow, bg, text]);
+  container.setSize(w, h);
+  // An explicit, centered Rectangle hitArea — Container's *default* hit area (from setSize()
+  // alone, with no explicit hitArea) is anchored to the container's top-left corner, which
+  // doesn't match this button's children (drawn centered, spanning -w/2..w/2/-h/2..h/2), so a
+  // default-sized hitArea would silently sit half a button-width off from the visible button.
+  container.setInteractive({
+    hitArea: new Phaser.Geom.Rectangle(-w / 2, -h / 2, w, h),
+    hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+    useHandCursor: true,
+  });
+  if (options.depth !== undefined) {
+    container.setDepth(options.depth);
+  }
+
+  wirePressFeedback(scene, container, shadow, h);
+
+  if (options.onTap) {
+    container.on(
+      'pointerup',
+      (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
+        event.stopPropagation();
+        options.onTap!();
+      },
+    );
+  }
+
+  const setLabel = (next: string) => {
+    text.setText(next);
+    const newW = Math.max(options.minWidth ?? 0, text.width + paddingX * 2);
+    if (Math.abs(newW - w) > 0.5) {
+      bg.clear();
+      drawButtonFace(bg, newW, h, radius, theme);
+      shadow.clear();
+      shadow.fillStyle(0x1a0f06, 0.25);
+      shadow.fillRoundedRect(-newW / 2, -h / 2 + 5, newW, h, radius);
+      container.setSize(newW, h);
+      // Regenerates the default size-based hit area rather than hand-editing hitArea directly —
+      // see the setInteractive() call above for why this button avoids a custom hitArea/callback.
+      container.removeInteractive();
+      container.setInteractive({ useHandCursor: true });
+    }
+  };
+
+  return { container, text, setLabel };
+}
+
+function drawButtonFace(g: Phaser.GameObjects.Graphics, w: number, h: number, radius: number, theme: ButtonTheme) {
+  g.fillGradientStyle(theme.top, theme.top, theme.bottom, theme.bottom, 1);
+  g.fillRoundedRect(-w / 2, -h / 2, w, h, radius);
+  g.lineStyle(2.5, theme.border, 1);
+  g.strokeRoundedRect(-w / 2 + 1.25, -h / 2 + 1.25, w - 2.5, h - 2.5, Math.max(0, radius - 1.25));
+  // Glossy top sheen — a lighter, semi-transparent cap over the upper ~45%, rounded to match the
+  // button's own top corners. This one detail (a believable highlight, not just a flat fill) is
+  // most of what separates "gradient rectangle" from "a glossy button" at a glance.
+  g.fillStyle(0xffffff, 0.3);
+  g.fillRoundedRect(-w / 2 + 3, -h / 2 + 3, w - 6, h * 0.42, { tl: radius - 2, tr: radius - 2, bl: 4, br: 4 });
+}
+
+/** Scale-down-and-spring press feedback, plus the shadow compressing toward the button on press
+ * so it reads as physically being pushed down, not just shrinking in place. */
+function wirePressFeedback(
+  scene: Phaser.Scene,
+  container: Phaser.GameObjects.Container,
+  shadow: Phaser.GameObjects.Graphics,
+  h: number,
+) {
+  const settle = () => {
+    scene.tweens.add({ targets: container, scale: 1, duration: 140, ease: 'Back.easeOut' });
+    scene.tweens.add({ targets: shadow, y: 0, duration: 140, ease: 'Back.easeOut' });
+  };
+  container.on('pointerdown', () => {
+    scene.tweens.add({ targets: container, scale: 0.94, duration: 70, ease: 'Sine.easeOut' });
+    scene.tweens.add({ targets: shadow, y: -3, duration: 70, ease: 'Sine.easeOut' });
+  });
+  container.on('pointerup', settle);
+  container.on('pointerout', settle);
+  void h;
+}
+
+export interface PanelOptions {
+  radius?: number;
+  fill?: number;
+  fillAlpha?: number;
+  borderColor?: number;
+  depth?: number;
+}
+
+/**
+ * A rounded, softly-shadowed card — replaces the flat `add.rectangle()` panels every overlay
+ * (pause, Game Over, Collection Book, Leaderboard) used before, which had square corners and a
+ * single flat fill with no shadow separating them from the dimmed backdrop behind them.
+ */
+export function createPanel(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  options: PanelOptions = {},
+): Phaser.GameObjects.Container {
+  const radius = options.radius ?? 26;
+  const fill = options.fill ?? 0xfff6e8;
+  const fillAlpha = options.fillAlpha ?? 1;
+  const borderColor = options.borderColor ?? 0xb8860b;
+
+  const shadow = scene.add.graphics();
+  shadow.fillStyle(0x1a0f06, 0.35);
+  shadow.fillRoundedRect(-w / 2, -h / 2 + 8, w, h, radius);
+
+  const bg = scene.add.graphics();
+  bg.fillStyle(fill, fillAlpha);
+  bg.fillRoundedRect(-w / 2, -h / 2, w, h, radius);
+  bg.lineStyle(2, borderColor, 0.9);
+  bg.strokeRoundedRect(-w / 2 + 1, -h / 2 + 1, w - 2, h - 2, radius - 1);
+  // Faint top sheen, same trick as the button face — keeps every card in the app feeling like
+  // part of one consistent material rather than a flat color swatch.
+  bg.fillStyle(0xffffff, 0.14);
+  bg.fillRoundedRect(-w / 2 + 3, -h / 2 + 3, w - 6, h * 0.3, { tl: radius - 2, tr: radius - 2, bl: 0, br: 0 });
+
+  const container = scene.add.container(x, y, [shadow, bg]);
+  if (options.depth !== undefined) {
+    container.setDepth(options.depth);
+  }
+  return container;
+}
+
+export type IconName = 'pause' | 'play' | 'speakerOn' | 'speakerOff' | 'close' | 'home' | 'restart' | 'trophy';
+
+/**
+ * A small circular "glass" chrome button with a hand-drawn vector icon — replaces plain emoji
+ * (⏸ 🔊 🔇) used directly as button labels before, which render as a full-color OS emoji glyph
+ * (inconsistent across devices, and reads as "a text character," not a designed control) rather
+ * than a control that matches the rest of the UI.
+ */
+export function createIconButton(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  icon: IconName,
+  options: { radius?: number; onTap?: () => void; depth?: number; theme?: 'light' | 'dark' } = {},
+): { container: Phaser.GameObjects.Container; setIcon: (next: IconName) => void } {
+  const radius = options.radius ?? 20;
+  const dark = options.theme !== 'light';
+
+  const shadow = scene.add.graphics();
+  shadow.fillStyle(0x1a0f06, 0.25);
+  shadow.fillCircle(0, 3, radius);
+
+  const bg = scene.add.graphics();
+  bg.fillStyle(dark ? 0x3a2b22 : 0xfff6e8, dark ? 0.55 : 0.9);
+  bg.fillCircle(0, 0, radius);
+  bg.lineStyle(1.5, dark ? 0xfff6e8 : 0xb69c73, dark ? 0.35 : 0.8);
+  bg.strokeCircle(0, 0, radius - 0.75);
+
+  const iconGfx = scene.add.graphics();
+  drawIcon(iconGfx, icon, radius, dark ? '#fff6e8' : '#3a2b22');
+
+  const container = scene.add.container(x, y, [shadow, bg, iconGfx]);
+  container.setSize(radius * 2, radius * 2);
+  // A centered Rectangle hitArea (same reasoning as createButton) — a square touch target for a
+  // round icon is a normal, common trade-off, and simpler/more reliable than a Circle hitArea.
+  container.setInteractive({
+    hitArea: new Phaser.Geom.Rectangle(-radius, -radius, radius * 2, radius * 2),
+    hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+    useHandCursor: true,
+  });
+  if (options.depth !== undefined) {
+    container.setDepth(options.depth);
+  }
+  wirePressFeedback(scene, container, shadow, radius * 2);
+
+  if (options.onTap) {
+    container.on(
+      'pointerup',
+      (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
+        event.stopPropagation();
+        options.onTap!();
+      },
+    );
+  }
+
+  const setIcon = (next: IconName) => {
+    iconGfx.clear();
+    drawIcon(iconGfx, next, radius, dark ? '#fff6e8' : '#3a2b22');
+  };
+
+  return { container, setIcon };
+}
+
+function drawIcon(g: Phaser.GameObjects.Graphics, icon: IconName, r: number, colorHex: string) {
+  const color = Phaser.Display.Color.HexStringToColor(colorHex).color;
+  g.fillStyle(color, 1);
+  g.lineStyle(Math.max(2, r * 0.16), color, 1);
+
+  const s = r * 0.62; // icon glyph half-extent, leaving a consistent margin inside the circle
+  switch (icon) {
+    case 'pause': {
+      const barW = s * 0.42;
+      g.fillRoundedRect(-s * 0.75, -s, barW, s * 2, barW * 0.3);
+      g.fillRoundedRect(s * 0.75 - barW, -s, barW, s * 2, barW * 0.3);
+      break;
+    }
+    case 'play': {
+      g.fillTriangle(-s * 0.6, -s, -s * 0.6, s, s * 0.85, 0);
+      break;
+    }
+    case 'speakerOn':
+    case 'speakerOff': {
+      g.fillRect(-s, -s * 0.4, s * 0.5, s * 0.8);
+      g.fillTriangle(-s * 0.5, -s * 0.4, -s * 0.5, s * 0.4, s * 0.15, s);
+      g.fillTriangle(-s * 0.5, -s * 0.4, -s * 0.5, s * 0.4, s * 0.15, -s);
+      if (icon === 'speakerOn') {
+        g.lineStyle(Math.max(2, r * 0.14), color, 1);
+        g.beginPath();
+        g.arc(s * 0.15, 0, s * 0.55, Phaser.Math.DegToRad(-45), Phaser.Math.DegToRad(45));
+        g.strokePath();
+        g.beginPath();
+        g.arc(s * 0.15, 0, s * 0.95, Phaser.Math.DegToRad(-45), Phaser.Math.DegToRad(45));
+        g.strokePath();
+      } else {
+        g.lineStyle(Math.max(2, r * 0.16), color, 1);
+        g.lineBetween(s * 0.25, -s * 0.55, s * 1.05, s * 0.55);
+        g.lineBetween(s * 1.05, -s * 0.55, s * 0.25, s * 0.55);
+      }
+      break;
+    }
+    case 'close': {
+      g.lineStyle(Math.max(2.5, r * 0.18), color, 1);
+      g.lineBetween(-s * 0.7, -s * 0.7, s * 0.7, s * 0.7);
+      g.lineBetween(s * 0.7, -s * 0.7, -s * 0.7, s * 0.7);
+      break;
+    }
+    case 'home': {
+      g.fillTriangle(-s, -s * 0.05, s, -s * 0.05, 0, -s * 0.95);
+      g.fillRect(-s * 0.65, -s * 0.05, s * 1.3, s * 1.0);
+      break;
+    }
+    case 'restart': {
+      g.lineStyle(Math.max(2.5, r * 0.18), color, 1);
+      g.beginPath();
+      g.arc(0, 0, s * 0.85, Phaser.Math.DegToRad(-40), Phaser.Math.DegToRad(220));
+      g.strokePath();
+      g.fillTriangle(s * 0.55, -s * 0.85, s * 1.05, -s * 0.4, s * 0.35, -s * 0.25);
+      break;
+    }
+    case 'trophy': {
+      g.fillRoundedRect(-s * 0.5, -s * 0.7, s, s * 0.9, 3);
+      g.lineStyle(Math.max(2, r * 0.14), color, 1);
+      g.beginPath();
+      g.arc(-s * 0.5, -s * 0.5, s * 0.35, Phaser.Math.DegToRad(90), Phaser.Math.DegToRad(270));
+      g.strokePath();
+      g.beginPath();
+      g.arc(s * 0.5, -s * 0.5, s * 0.35, Phaser.Math.DegToRad(-90), Phaser.Math.DegToRad(90));
+      g.strokePath();
+      g.fillRect(-s * 0.18, s * 0.2, s * 0.36, s * 0.35);
+      g.fillRoundedRect(-s * 0.5, s * 0.5, s, s * 0.18, 3);
+      break;
+    }
+  }
+}
+
+/** Quiet, small-print UI text (hints, captions, footers) — Nunito rather than the heavy Baloo 2
+ * display face every piece of text used before, which is what gave the whole app a flat, single
+ * type-size-and-weight feel with no hierarchy. */
+export function bodyTextStyle(overrides: Partial<Phaser.Types.GameObjects.Text.TextStyle> = {}) {
+  return {
+    fontFamily: UI_FONT_FAMILY,
+    fontSize: '14px',
+    color: '#f7ecd9',
+    ...overrides,
+  };
+}
