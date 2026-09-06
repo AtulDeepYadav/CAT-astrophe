@@ -83,7 +83,7 @@ export class MenuScene extends Phaser.Scene {
     // don't compete with Play/Daily/Zen/Leaderboard — this is a stopgap for real cloud save
     // (needs the native wrapping this project hasn't done yet), not a headline feature.
     const backupLink = this.add
-      .text(GAME_WIDTH / 2 - 70, GAME_HEIGHT - 70, '💾 Backup', {
+      .text(GAME_WIDTH / 2 - 70, GAME_HEIGHT - 85, '💾 Backup', {
         fontFamily: FONT_FAMILY,
         fontSize: '13px',
         color: '#f2e6d3',
@@ -93,7 +93,7 @@ export class MenuScene extends Phaser.Scene {
     backupLink.on('pointerdown', () => this.backupProgress());
 
     const restoreLink = this.add
-      .text(GAME_WIDTH / 2 + 70, GAME_HEIGHT - 70, '📥 Restore', {
+      .text(GAME_WIDTH / 2 + 70, GAME_HEIGHT - 85, '📥 Restore', {
         fontFamily: FONT_FAMILY,
         fontSize: '13px',
         color: '#f2e6d3',
@@ -101,6 +101,19 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
     restoreLink.on('pointerdown', () => this.restoreProgress());
+
+    // Required reading for a Play Store listing, not just a submission-time URL — the policy
+    // needs to be reachable from inside the app too. Opens in a new tab so the running game
+    // (and anything mid-round) isn't disrupted by navigating away from it.
+    const privacyLink = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 60, 'Privacy Policy', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '12px',
+        color: '#b8a98f',
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    privacyLink.on('pointerdown', () => window.open('/privacy.html', '_blank', 'noopener'));
 
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT - 40, 'Drop cats. Merge cats. Try not to cat-astrophe.', {
