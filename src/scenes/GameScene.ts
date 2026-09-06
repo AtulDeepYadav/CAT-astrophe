@@ -1359,15 +1359,27 @@ export class GameScene extends Phaser.Scene {
   /** Golden-glow color swatches, gated behind lifetime Crown count — tap an unlocked one to select it. */
   private buildStyleTab(): Phaser.GameObjects.Container {
     const intro = this.add
-      .text(GAME_WIDTH / 2, 100, 'Pick your Golden Cat glow color', {
+      .text(GAME_WIDTH / 2, 92, 'Pick your Golden Cat glow color', {
         fontFamily: UI_FONT_FAMILY,
         fontSize: '14px',
         color: '#c9bdae',
       })
       .setOrigin(0.5);
 
-    const children: Phaser.GameObjects.GameObject[] = [intro];
-    const rowTop = 150;
+    // Visible while shopping so "or 🐟 N" on a locked row is an actual decision, not a guess at
+    // whether the balance covers it.
+    const fishBalance = this.add
+      .text(GAME_WIDTH / 2, 116, '', {
+        fontFamily: UI_FONT_FAMILY,
+        fontSize: '13px',
+        fontStyle: '700',
+        color: '#ffd873',
+      })
+      .setOrigin(0.5);
+    fishBalance.setName('style-fish-balance');
+
+    const children: Phaser.GameObjects.GameObject[] = [intro, fishBalance];
+    const rowTop = 162;
     const rowHeight = 68;
     this.cosmeticSwatchBounds = [];
 
@@ -1436,18 +1448,7 @@ export class GameScene extends Phaser.Scene {
       icon?.setText(unlocked ? achievement.icon : '🔒');
     }
 
-    const bigCats = this.stats.get().bigCatsCreated;
-    for (const option of COSMETIC_OPTIONS) {
-      const unlocked = this.cosmetics.isUnlocked(option.id, bigCats);
-      const selected = this.cosmetics.getSelectedId() === option.id;
-      const circle = this.styleTabContainer.getByName(`style-circle-${option.id}`) as Phaser.GameObjects.Arc | null;
-      const name = this.styleTabContainer.getByName(`style-name-${option.id}`) as Phaser.GameObjects.Text | null;
-      const status = this.styleTabContainer.getByName(`style-status-${option.id}`) as Phaser.GameObjects.Text | null;
-      circle?.setAlpha(unlocked ? 1 : 0.3);
-      circle?.setStrokeStyle(selected ? 3 : 2, selected ? 0xffffff : 0xfdf6ec, selected ? 1 : 0.4);
-      name?.setAlpha(unlocked ? 1 : 0.4);
-      status?.setText(selected ? 'Selected' : unlocked ? 'Tap to select' : `🔒 Needs ${option.unlockBigCats} 🐆`);
-    }
+    this.refreshStyleTab();
 
     this.setCollectionBookTab('cats');
     this.collectionBookContainer.setVisible(true);
@@ -1504,18 +1505,53 @@ export class GameScene extends Phaser.Scene {
     return null;
   }
 
-  /** Selects a cosmetic if unlocked, re-rendering the Style tab's selection state in place. */
+  /**
+   * Selects a cosmetic if already unlocked; if it's locked, spends Fish to unlock it on the spot
+   * instead of silently no-opping — the first real purchase Fish can make besides a Revive. A tap
+   * on a locked-but-unaffordable swatch gets an explicit "not enough" toast rather than nothing
+   * happening with no explanation.
+   */
   private selectCosmetic(id: string) {
     const bigCats = this.stats.get().bigCatsCreated;
-    if (!this.cosmetics.select(id, bigCats)) {
+    const option = COSMETIC_OPTIONS.find((o) => o.id === id);
+    if (!option) {
       return;
     }
+
+    if (!this.cosmetics.isUnlocked(id, bigCats)) {
+      if (option.unlockFish <= 0 || !this.currency.spend(option.unlockFish)) {
+        this.showToast(`Not enough 🐟 — need ${option.unlockFish}, you have ${this.currency.balance}`);
+        return;
+      }
+      this.cosmetics.markPurchased(id);
+      this.vibrate([15, 25, 15]);
+    }
+
+    this.cosmetics.select(id, bigCats);
+    this.refreshStyleTab();
+  }
+
+  /** Redraws every Style tab row against current unlock/purchase/selection state — shared by the
+   * book's initial open and by selectCosmetic after a purchase or selection. */
+  private refreshStyleTab() {
+    const bigCats = this.stats.get().bigCatsCreated;
+    const fishBalance = this.styleTabContainer.getByName('style-fish-balance') as Phaser.GameObjects.Text | null;
+    fishBalance?.setText(`🐟 ${this.currency.balance} available`);
     for (const option of COSMETIC_OPTIONS) {
-      const selected = option.id === id;
+      const unlocked = this.cosmetics.isUnlocked(option.id, bigCats);
+      const selected = this.cosmetics.getSelectedId() === option.id;
       const circle = this.styleTabContainer.getByName(`style-circle-${option.id}`) as Phaser.GameObjects.Arc | null;
+      const name = this.styleTabContainer.getByName(`style-name-${option.id}`) as Phaser.GameObjects.Text | null;
       const status = this.styleTabContainer.getByName(`style-status-${option.id}`) as Phaser.GameObjects.Text | null;
+      circle?.setAlpha(unlocked ? 1 : 0.3);
       circle?.setStrokeStyle(selected ? 3 : 2, selected ? 0xffffff : 0xfdf6ec, selected ? 1 : 0.4);
-      status?.setText(selected ? 'Selected' : this.cosmetics.isUnlocked(option.id, bigCats) ? 'Tap to select' : status?.text ?? '');
+      name?.setAlpha(unlocked ? 1 : 0.4);
+      const statusText = selected
+        ? 'Selected'
+        : unlocked
+          ? 'Tap to select'
+          : `🔒 Need ${option.unlockBigCats} 🐆 or 🐟 ${option.unlockFish}`;
+      status?.setText(statusText);
     }
   }
 

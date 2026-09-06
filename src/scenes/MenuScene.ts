@@ -10,6 +10,7 @@ import { DailyChallengeSystem } from '../systems/DailyChallengeSystem';
 import { SettingsSystem } from '../systems/SettingsSystem';
 import { CollectionSystem } from '../systems/CollectionSystem';
 import { CurrencySystem } from '../systems/CurrencySystem';
+import { StreakSystem } from '../systems/StreakSystem';
 import { exportSaveData, importSaveData } from '../systems/saveBackup';
 import { getCatData, portraitTextureKeyForLevel } from '../config/catData';
 import { shareViaWebShare } from '../systems/socialShare';
@@ -42,6 +43,16 @@ export class MenuScene extends Phaser.Scene {
     const daily = new DailyChallengeSystem();
     const currency = new CurrencySystem();
     const modifier = todaysModifier();
+
+    // Checked in before anything reads the Fish balance below, so a fresh streak bonus shows up
+    // immediately in the stat chip rather than a stale number until the next Menu visit. Safe to
+    // call every time this scene loads (including a same-day return from a run) — it only
+    // advances the streak once per calendar day.
+    const streak = new StreakSystem();
+    const streakResult = streak.checkIn();
+    if (streakResult.isNewDay && streakResult.fishBonus > 0) {
+      currency.add(streakResult.fishBonus);
+    }
 
     this.modalHistoryDepth = 0;
     // Removed first — scene.start('Menu') reuses this Scene object rather than reconstructing
@@ -85,7 +96,19 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setShadow(0, 5, 'rgba(20,12,4,0.45)', 8, false, true);
 
-    this.buildStatChips(score.best, currency.balance);
+    const chipLabels = [`🏅 ${score.best}`, `🐟 ${currency.balance}`];
+    if (streakResult.streak >= 2) {
+      chipLabels.push(`🔥 ${streakResult.streak}`);
+    }
+    this.buildStatChips(chipLabels);
+
+    if (streakResult.isNewDay && streakResult.fishBonus > 0) {
+      this.showToast(
+        streakResult.streak >= 2
+          ? `🔥 ${streakResult.streak}-day streak! +${streakResult.fishBonus} 🐟`
+          : `Welcome back! +${streakResult.fishBonus} 🐟`,
+      );
+    }
 
     createButton(this, GAME_WIDTH / 2, 280, '▶  Play', THEME.primary, {
       fontSize: 21,
@@ -162,15 +185,15 @@ export class MenuScene extends Phaser.Scene {
     setContainerInteractive(this.leaderboardContainer, false);
   }
 
-  /** Two small side-by-side "stat chip" pills (Best Score, Fish) rather than one plain line of
-   * text — reads as a mini dashboard instead of a caption, and gives the Fish balance its own
-   * visual weight now that it's a real spendable currency. */
-  private buildStatChips(best: number, fish: number) {
+  /** Small side-by-side "stat chip" pills (Best Score, Fish, and a streak once there is one)
+   * rather than one plain line of text — reads as a mini dashboard instead of a caption, and
+   * gives the Fish balance its own visual weight now that it's a real spendable currency. */
+  private buildStatChips(labels: string[]) {
     const y = 158;
     const chipH = 30;
     const gap = 10;
 
-    const makeChip = (label: string, cx: number): number => {
+    const makeChip = (label: string, cx: number) => {
       const text = this.add
         .text(0, 0, label, bodyTextStyle({ fontSize: '14px', fontStyle: '700', color: '#4a2c0d' }))
         .setOrigin(0.5);
@@ -181,26 +204,26 @@ export class MenuScene extends Phaser.Scene {
       bg.lineStyle(1.5, 0xb69c73, 0.8);
       bg.strokeRoundedRect(-w / 2 + 0.75, -chipH / 2 + 0.75, w - 1.5, chipH - 1.5, chipH / 2 - 0.75);
       this.add.container(cx, y, [bg, text]);
-      return w;
     };
 
-    const bestLabel = `🏅 ${best}`;
-    const fishLabel = `🐟 ${fish}`;
-    // Measure both first (off-screen trick isn't needed — text width is known immediately after
-    // creation) so the pair can be centered as a unit rather than guessing a fixed offset.
-    const probeBest = this.add.text(0, 0, bestLabel, { fontSize: '14px', fontStyle: '700' }).setVisible(false);
-    const probeFish = this.add.text(0, 0, fishLabel, { fontSize: '14px', fontStyle: '700' }).setVisible(false);
-    const wBest = probeBest.width + 26;
-    const wFish = probeFish.width + 26;
-    probeBest.destroy();
-    probeFish.destroy();
+    // Measure every chip first (a throwaway probe Text is the simplest way to get real rendered
+    // width before committing to a layout) so the whole row can be centered as one unit rather
+    // than guessing fixed offsets — needed now that the chip count varies (2 normally, 3 once a
+    // streak exists).
+    const widths = labels.map((label) => {
+      const probe = this.add.text(0, 0, label, { fontSize: '14px', fontStyle: '700' }).setVisible(false);
+      const w = probe.width + 26;
+      probe.destroy();
+      return w;
+    });
 
-    const totalW = wBest + gap + wFish;
-    const leftX = GAME_WIDTH / 2 - totalW / 2 + wBest / 2;
-    const rightX = GAME_WIDTH / 2 + totalW / 2 - wFish / 2;
-
-    makeChip(bestLabel, leftX);
-    makeChip(fishLabel, rightX);
+    const totalW = widths.reduce((sum, w) => sum + w, 0) + gap * (labels.length - 1);
+    let cursor = GAME_WIDTH / 2 - totalW / 2;
+    labels.forEach((label, i) => {
+      const cx = cursor + widths[i] / 2;
+      makeChip(label, cx);
+      cursor += widths[i] + gap;
+    });
   }
 
   /** Copies a portable backup code to the clipboard — see saveBackup.ts for why this exists
