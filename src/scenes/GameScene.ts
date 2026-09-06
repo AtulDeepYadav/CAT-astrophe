@@ -85,9 +85,15 @@ export class GameScene extends Phaser.Scene {
   private dropIsGolden = false;
   private highestLevelThisRun = 1;
 
-  private worldBackground!: Phaser.GameObjects.Image;
+  // Two stacked layers crossfaded against each other rather than one Image with setTexture() —
+  // a hard cut between two frames that only differ by a sliver (a leaf drifting, a bird's wing)
+  // doesn't read as motion, it reads as a flicker/pop. Dissolving between them over most of each
+  // frame's hold time is what actually sells "gently animated," the same trick a live-wallpaper
+  // app uses to loop a handful of stills. bgLayers[bgFrontLayerIdx] is the currently-visible one.
+  private bgLayers: [Phaser.GameObjects.Image, Phaser.GameObjects.Image] = [null!, null!];
+  private bgFrontLayerIdx: 0 | 1 = 0;
   private currentZoneKey: WorldZoneKey = 'home';
-  /** 1-indexed to match the source art's own "Frame 1".."Frame 4" labeling. */
+  /** 1-indexed to match the source art's own "Frame 1".."Frame 4" labeling — the front layer's. */
   private bgFrameIndex = 1;
   private bgFrameTimer?: Phaser.Time.TimerEvent;
 
@@ -188,12 +194,18 @@ export class GameScene extends Phaser.Scene {
     // World backdrop — drawn first (and pinned behind everything) so it sits under the header,
     // the panel, and the arena's semi-transparent fill. Swaps as `highestLevelThisRun` crosses
     // into a new zone (see updateWorldBackground); baked to exactly GAME_WIDTH x GAME_HEIGHT so
-    // it needs no scaling. Each zone is a 4-frame seamless loop (see startBackgroundLoop) rather
-    // than one static image.
-    this.worldBackground = this.add
-      .image(0, 0, backgroundFrameTextureKey(this.currentZoneKey, this.bgFrameIndex))
-      .setOrigin(0, 0)
-      .setDepth(-100);
+    // it needs no scaling. Each zone is a 4-frame seamless loop, crossfaded frame-to-frame (see
+    // startBackgroundLoop) rather than a hard cut between stills.
+    this.bgLayers = [
+      this.add.image(0, 0, backgroundFrameTextureKey(this.currentZoneKey, 1)).setOrigin(0, 0).setDepth(-100),
+      this.add
+        .image(0, 0, backgroundFrameTextureKey(this.currentZoneKey, 2))
+        .setOrigin(0, 0)
+        .setDepth(-100)
+        .setAlpha(0),
+    ];
+    this.bgFrontLayerIdx = 0;
+    this.bgFrameIndex = 1;
     this.startBackgroundLoop();
 
     this.buildHeaderText();
@@ -525,16 +537,25 @@ export class GameScene extends Phaser.Scene {
       this.tryUnlockAchievement('reach_savannah');
     }
 
+    // Crossfades straight from the old zone's current frame to the new zone's frame 1 — no
+    // fade-to-nothing-then-fade-in step, so the canvas's own background color never flashes
+    // through. Defensively kills any in-flight frame-cycle or prior zone-change tween on these
+    // two layers first: rapid merges can cross two zone boundaries close together.
+    this.bgFrameTimer?.remove();
+    this.tweens.killTweensOf(this.bgLayers);
+    const outgoing = this.bgLayers[this.bgFrontLayerIdx];
+    const incoming = this.bgLayers[1 - this.bgFrontLayerIdx];
+    incoming.setTexture(backgroundFrameTextureKey(zone.key, 1)).setAlpha(0);
+    this.tweens.add({ targets: outgoing, alpha: 0, duration: 420, ease: 'Sine.easeIn' });
     this.tweens.add({
-      targets: this.worldBackground,
-      alpha: 0,
-      duration: 260,
-      ease: 'Sine.easeIn',
+      targets: incoming,
+      alpha: 1,
+      duration: 420,
+      ease: 'Sine.easeOut',
       onComplete: () => {
+        this.bgFrontLayerIdx = this.bgFrontLayerIdx === 0 ? 1 : 0;
         this.bgFrameIndex = 1;
-        this.worldBackground.setTexture(backgroundFrameTextureKey(zone.key, this.bgFrameIndex));
         this.startBackgroundLoop();
-        this.tweens.add({ targets: this.worldBackground, alpha: 1, duration: 420, ease: 'Sine.easeOut' });
       },
     });
 
@@ -546,20 +567,35 @@ export class GameScene extends Phaser.Scene {
 
   /**
    * Each zone backdrop is a 4-frame seamless loop (leaves sway, water flows, clouds drift —
-   * subtle idle motion, not a full animation) that advances one frame per second and wraps back
-   * to frame 1. Restarted (not just left running) on every zone change so a zone always opens on
-   * its own frame 1 instead of whatever frame index the previous zone happened to stop on.
+   * subtle idle motion, not a full animation). The frame-to-frame differences are subtle by
+   * design (it's meant to read as "alive," not as a slideshow), which means a hard `setTexture`
+   * cut between them reads as a flicker instead of motion — so instead this dissolves
+   * continuously from one frame into the next over the *entire* interval, rather than holding a
+   * frame and then popping to the next. Restarted (not just left running) on every zone change so
+   * a zone always opens on its own frame 1 instead of whatever frame index the previous zone
+   * happened to stop on.
    */
   private startBackgroundLoop() {
+    const FRAME_INTERVAL_MS = 1000;
     this.bgFrameTimer?.remove();
     this.bgFrameTimer = this.time.addEvent({
-      delay: 1000,
+      delay: FRAME_INTERVAL_MS,
       loop: true,
-      callback: () => {
-        this.bgFrameIndex = (this.bgFrameIndex % BG_FRAME_COUNT) + 1;
-        this.worldBackground.setTexture(backgroundFrameTextureKey(this.currentZoneKey, this.bgFrameIndex));
-      },
+      callback: () => this.crossfadeToNextBackgroundFrame(FRAME_INTERVAL_MS),
     });
+  }
+
+  private crossfadeToNextBackgroundFrame(durationMs: number) {
+    const front = this.bgLayers[this.bgFrontLayerIdx];
+    const back = this.bgLayers[1 - this.bgFrontLayerIdx];
+    const nextFrame = (this.bgFrameIndex % BG_FRAME_COUNT) + 1;
+
+    back.setTexture(backgroundFrameTextureKey(this.currentZoneKey, nextFrame)).setAlpha(0);
+    this.tweens.add({ targets: front, alpha: 0, duration: durationMs, ease: 'Sine.easeInOut' });
+    this.tweens.add({ targets: back, alpha: 1, duration: durationMs, ease: 'Sine.easeInOut' });
+
+    this.bgFrameIndex = nextFrame;
+    this.bgFrontLayerIdx = this.bgFrontLayerIdx === 0 ? 1 : 0;
   }
 
   /** Once-per-run "you've reached a new area" banner — home has none, it's the starting zone. */
