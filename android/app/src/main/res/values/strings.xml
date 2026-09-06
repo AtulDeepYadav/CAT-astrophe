@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Cat-astrophe</string>
+    <string name="title_activity_main">Cat-astrophe</string>
+    <string name="package_name">com.catastrophe.game</string>
+    <string name="custom_url_scheme">com.catastrophe.game</string>
+</resources>

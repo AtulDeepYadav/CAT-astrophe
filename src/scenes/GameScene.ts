@@ -51,6 +51,7 @@ import { SettingsSystem } from '../systems/SettingsSystem';
 import { OnboardingSystem } from '../systems/OnboardingSystem';
 import { CurrencySystem, fishEarnedForScore } from '../systems/CurrencySystem';
 import { ensureAmbientMusic } from '../systems/MusicSystem';
+import { monetization } from '../systems/MonetizationSystem';
 import { THEME, createButton, createIconButton, createPanel, drawIconGlyph, setContainerInteractive } from '../ui/uiKit';
 import { REVIVE_COST_FISH } from '../config/gameConfig';
 import {
@@ -180,6 +181,10 @@ export class GameScene extends Phaser.Scene {
   private newBestBanner!: Phaser.GameObjects.Text;
   private reviveOfferContainer!: Phaser.GameObjects.Container;
   private reviveCostText!: Phaser.GameObjects.Text;
+  private reviveWithFishButton!: Phaser.GameObjects.Container;
+  private reviveWithAdButton!: Phaser.GameObjects.Container;
+  private reviveDeclineButton!: Phaser.GameObjects.Text;
+  private reviveOfferCenterY = 0;
   // One revive offer per run, spent or declined — see triggerGameOver/showReviveOffer.
   private hasUsedRevive = false;
   private purrBarFill!: Phaser.GameObjects.Graphics;
@@ -2044,10 +2049,12 @@ export class GameScene extends Phaser.Scene {
     const centerX = GAME_WIDTH / 2;
     const centerY = GAME_HEIGHT / 2;
     const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.72).setOrigin(0, 0);
-    const panel = createPanel(this, centerX, centerY, 300, 300, { radius: 28 });
+    // Taller than the original 300 — there are now up to two ways to continue (spend Fish, or
+    // watch a rewarded ad) stacked instead of one, plus End run below both.
+    const panel = createPanel(this, centerX, centerY, 300, 360, { radius: 28 });
 
     const title = this.add
-      .text(centerX, centerY - 95, '😿 Oh no!', {
+      .text(centerX, centerY - 140, '😿 Oh no!', {
         fontFamily: FONT_FAMILY,
         fontSize: '28px',
         fontStyle: '800',
@@ -2056,7 +2063,7 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.reviveCostText = this.add
-      .text(centerX, centerY - 45, '', {
+      .text(centerX, centerY - 90, '', {
         fontFamily: UI_FONT_FAMILY,
         fontSize: '16px',
         color: '#6f6152',
@@ -2065,13 +2072,26 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    const continueBtn = createButton(this, centerX, centerY + 30, '▶  Continue', THEME.primary, {
-      minWidth: 200,
+    const reviveWithFish = createButton(this, centerX, centerY - 15, '▶  Continue', THEME.primary, {
+      minWidth: 220,
       onTap: () => this.acceptRevive(),
     });
+    this.reviveWithFishButton = reviveWithFish.container;
 
+    // Only ever offered on the native Android build with a preloaded ad — see
+    // MonetizationSystem's class doc for why the web build never shows this at all. Toggled
+    // per-offer in showReviveOffer() rather than baked in here, since ad readiness can change
+    // between one Game Over and the next.
+    const reviveWithAd = createButton(this, centerX, centerY + 55, '📺  Watch ad — Free', THEME.info, {
+      minWidth: 220,
+      fontSize: 16,
+      onTap: () => this.acceptReviveViaAd(),
+    });
+    this.reviveWithAdButton = reviveWithAd.container;
+
+    this.reviveOfferCenterY = centerY;
     const declineButton = this.add
-      .text(centerX, centerY + 100, 'End run', { fontFamily: FONT_FAMILY, fontSize: '15px', color: '#8a7c63' })
+      .text(centerX, centerY + 125, 'End run', { fontFamily: FONT_FAMILY, fontSize: '15px', color: '#8a7c63' })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
     declineButton.on(
@@ -2081,13 +2101,15 @@ export class GameScene extends Phaser.Scene {
         this.declineRevive();
       },
     );
+    this.reviveDeclineButton = declineButton;
 
     const container = this.add.container(0, 0, [
       overlayBg,
       panel,
       title,
       this.reviveCostText,
-      continueBtn.container,
+      reviveWithFish.container,
+      reviveWithAd.container,
       declineButton,
     ]);
     container.setDepth(1000);
@@ -2291,29 +2313,80 @@ export class GameScene extends Phaser.Scene {
 
     // Zen Mode never reaches here (no fail state), and only one revive per run — decline it once
     // and the run really is over, no second chance to reconsider once you're back at this point.
-    if (this.mode !== 'zen' && !this.hasUsedRevive && this.currency.balance >= REVIVE_COST_FISH) {
+    // Affordability used to be the sole gate on even *showing* this offer, which meant a player
+    // with 0 Fish never saw it at all — now a ready rewarded ad (Android only, see
+    // MonetizationSystem) is a second, independent way in, so the offer still shows if either
+    // path is available; showReviveOffer() itself decides which button(s) to actually display.
+    const canOfferFish = this.currency.balance >= REVIVE_COST_FISH;
+    if (this.mode !== 'zen' && !this.hasUsedRevive && (canOfferFish || monetization.canShowRewardedAd)) {
       this.showReviveOffer();
       return;
     }
     this.finalizeGameOver();
   }
 
-  /** A brief "spend Fish to keep going" prompt shown before the real Game Over screen, the one
-   * time per run it's offered and affordable. Declining (or the board somehow tapping through)
-   * falls straight into the normal finalizeGameOver flow — this container never blocks that. */
+  /** A brief "keep going" prompt shown before the real Game Over screen, the one time per run
+   * it's offered. Declining (or the board somehow tapping through) falls straight into the normal
+   * finalizeGameOver flow — this container never blocks that. */
   private showReviveOffer() {
-    this.reviveCostText.setText(`You have 🐟 ${this.currency.balance} — Continue for 🐟 ${REVIVE_COST_FISH}?`);
+    const canOfferFish = this.currency.balance >= REVIVE_COST_FISH;
+    const canOfferAd = monetization.canShowRewardedAd;
+
+    this.reviveCostText.setText(
+      canOfferFish
+        ? `You have 🐟 ${this.currency.balance} — Continue for 🐟 ${REVIVE_COST_FISH}?`
+        : 'Not enough 🐟 to continue that way —',
+    );
+    this.reviveWithFishButton.setVisible(canOfferFish);
+    setContainerInteractive(this.reviveWithFishButton, canOfferFish);
+    this.reviveWithAdButton.setVisible(canOfferAd);
+    setContainerInteractive(this.reviveWithAdButton, canOfferAd);
+
+    // Re-flow the stack so a single available option sits centered rather than leaving an empty
+    // gap where the other one would have been — this is the common case on the web build, which
+    // never offers the ad path at all (see MonetizationSystem's class doc).
+    const centerY = this.reviveOfferCenterY;
+    if (canOfferFish && canOfferAd) {
+      this.reviveWithFishButton.setY(centerY - 15);
+      this.reviveWithAdButton.setY(centerY + 55);
+      this.reviveDeclineButton.setY(centerY + 125);
+    } else {
+      const soleButton = canOfferFish ? this.reviveWithFishButton : this.reviveWithAdButton;
+      soleButton.setY(centerY + 20);
+      this.reviveDeclineButton.setY(centerY + 90);
+    }
+
     this.reviveOfferContainer.setVisible(true);
     setContainerInteractive(this.reviveOfferContainer, true);
     this.pushModalHistoryEntry();
   }
 
-  /** Spends the Fish, clears the cats crowding the danger line so there's actually room to keep
-   * playing, and resumes the run in place — same board, same score, just breathing room back. */
+  /** Spends the Fish, then hands off to the shared revive logic below. */
   private acceptRevive() {
     if (!this.currency.spend(REVIVE_COST_FISH)) {
       return; // balance changed out from under us somehow — just fall through to Game Over below
     }
+    this.performRevive();
+  }
+
+  /** Rewarded-ad path: only spends the *ad*, not any Fish. Leaves the offer up (rather than
+   * falling through to Game Over) if the ad failed to show, so the player can still fall back to
+   * the Fish option or End run — a missed ad load shouldn't feel like it cost them their run. */
+  private async acceptReviveViaAd() {
+    const earned = await monetization.showRewardedAd();
+    if (!earned) {
+      this.reviveWithAdButton.setVisible(monetization.canShowRewardedAd);
+      setContainerInteractive(this.reviveWithAdButton, monetization.canShowRewardedAd);
+      this.showToast("Ad didn't finish — try again or spend 🐟");
+      return;
+    }
+    this.performRevive();
+  }
+
+  /** Clears the cats crowding the danger line so there's actually room to keep playing, and
+   * resumes the run in place — same board, same score, just breathing room back. Shared by both
+   * the Fish and rewarded-ad revive paths once each has separately confirmed payment. */
+  private performRevive() {
     this.hasUsedRevive = true;
     this.reviveOfferContainer.setVisible(false);
     setContainerInteractive(this.reviveOfferContainer, false);
@@ -2434,7 +2507,11 @@ export class GameScene extends Phaser.Scene {
       },
     });
 
-    this.input.once('pointerdown', () => {
+    this.input.once('pointerdown', async () => {
+      // The natural-break interstitial spot: the player has already seen their result and has
+      // just chosen to leave it, rather than mid-drop or before they've even seen their score.
+      // No-ops entirely on web / with ads removed — see MonetizationSystem.adsDisabled.
+      await monetization.showInterstitial();
       // Explicit mode, not a bare restart() — Phaser doesn't carry init() data forward on its
       // own, so an argument-less restart from a Daily Challenge run would silently drop the
       // player back into Normal mode instead of letting them retry the same challenge.

@@ -16,6 +16,7 @@ import { getCatData, portraitTextureKeyForLevel } from '../config/catData';
 import { shareViaWebShare } from '../systems/socialShare';
 import { ensureAmbientMusic } from '../systems/MusicSystem';
 import { THEME, bodyTextStyle, createButton, createIconButton, createPanel, setContainerInteractive } from '../ui/uiKit';
+import { monetization } from '../systems/MonetizationSystem';
 
 /**
  * Title screen — the game used to boot straight into a live round with no beat before the
@@ -28,6 +29,8 @@ export class MenuScene extends Phaser.Scene {
   private leaderboardContainer!: Phaser.GameObjects.Container;
   private settings = new SettingsSystem();
   private muteIcon!: { container: Phaser.GameObjects.Container; setIcon: (n: 'speakerOn' | 'speakerOff') => void };
+  private removeAdsLink?: Phaser.GameObjects.Text;
+  private restorePurchaseLink?: Phaser.GameObjects.Text;
 
   // Mirrors GameScene's own modal/back-button bookkeeping (see its pushModalHistoryEntry doc
   // comment) so the Android back gesture closes the Leaderboard overlay instead of leaving the
@@ -154,6 +157,47 @@ export class MenuScene extends Phaser.Scene {
 
     this.buildHeroShowcase();
 
+    // Android-app-only — see MonetizationSystem's class doc for why the web build never shows
+    // ads at all, meaning there's nothing to remove here. Starts hidden: whether to show it
+    // depends on isNative (known immediately) *and* whether Remove Ads was already bought, which
+    // isn't known until monetization.initialize() resolves — awaited below rather than assumed.
+    this.removeAdsLink = this.add
+      .text(
+        GAME_WIDTH / 2 - 75,
+        GAME_HEIGHT - 110,
+        '🚫 Remove Ads',
+        bodyTextStyle({ fontSize: '13px', color: '#f2e6d3' }),
+      )
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true })
+      .setVisible(false);
+    this.removeAdsLink.on('pointerdown', () => this.purchaseRemoveAds());
+
+    this.restorePurchaseLink = this.add
+      .text(
+        GAME_WIDTH / 2 + 75,
+        GAME_HEIGHT - 110,
+        'Restore purchase',
+        bodyTextStyle({ fontSize: '13px', color: '#f2e6d3' }),
+      )
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true })
+      .setVisible(false);
+    this.restorePurchaseLink.on('pointerdown', () => this.restorePurchase());
+
+    if (monetization.isNative) {
+      void monetization.initialize().then(() => {
+        // The player could have backed out to a run and back, or the scene could have been torn
+        // down entirely, by the time this resolves — never touch a dead scene's game objects.
+        if (!this.scene.isActive()) {
+          return;
+        }
+        const stillNeeded = !monetization.hasRemovedAds;
+        this.removeAdsLink?.setVisible(stillNeeded);
+        this.restorePurchaseLink?.setVisible(stillNeeded);
+      });
+    }
+
     // Secondary maintenance actions, deliberately low-key (plain text, no button chrome) so they
     // don't compete with Play/Daily/Zen/Leaderboard — this is a stopgap for real cloud save
     // (needs the native wrapping this project hasn't done yet), not a headline feature.
@@ -250,6 +294,30 @@ export class MenuScene extends Phaser.Scene {
       this.showToast('Copied! Paste it somewhere safe.');
     } catch {
       this.showToast('Could not copy — try again.');
+    }
+  }
+
+  /** Buys the "remove_ads" one-time product — see MonetizationSystem for the actual RevenueCat
+   * call. A cancelled purchase sheet resolves `false` here same as a real failure; either way
+   * there's nothing more specific worth telling the player than "it didn't go through." */
+  private async purchaseRemoveAds() {
+    const bought = await monetization.purchaseRemoveAds();
+    if (bought) {
+      this.showToast('Ads removed — thank you! 💛');
+      this.removeAdsLink?.setVisible(false);
+      this.restorePurchaseLink?.setVisible(false);
+    }
+  }
+
+  /** Recovers a prior Remove Ads purchase after a reinstall or new device — RevenueCat ties the
+   * entitlement to the player's Google account, not this device's storage, so this is the
+   * intended recovery path rather than anything Backup/Restore's save-data code touches. */
+  private async restorePurchase() {
+    const restored = await monetization.restorePurchases();
+    this.showToast(restored ? 'Purchase restored!' : 'No previous purchase found.');
+    if (restored) {
+      this.removeAdsLink?.setVisible(false);
+      this.restorePurchaseLink?.setVisible(false);
     }
   }
 

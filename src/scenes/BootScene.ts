@@ -12,6 +12,7 @@ import {
 import { BG_FRAME_COUNT, WORLD_ZONES, backgroundFrameTextureKey } from '../config/worldZones';
 import { animFrameTextureKey, framesForLevel } from '../config/catAnimations';
 import { AMBIENT_MUSIC_KEY } from '../systems/MusicSystem';
+import { monetization } from '../systems/MonetizationSystem';
 
 const GLOW_TEXTURE_SIZE = 160;
 
@@ -87,6 +88,10 @@ export class BootScene extends Phaser.Scene {
     }
 
     this.buildGoldenGlowTexture();
+    // Fire-and-forget: on web this resolves instantly (a no-op), and on Android it brings up the
+    // AdMob/RevenueCat SDKs and preloads the first rewarded ad in the background. Nothing here
+    // gates the menu on it — a slow ad-network response should never delay getting into the game.
+    void monetization.initialize();
     // Phaser bakes Text objects to a texture at creation time — starting the Game scene before
     // the webfont resolves would freeze every label onto the system fallback font permanently,
     // not just for one frame. Race against a timeout so a slow/unavailable font API can never
