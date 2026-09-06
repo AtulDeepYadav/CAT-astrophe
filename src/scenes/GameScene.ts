@@ -336,6 +336,15 @@ export class GameScene extends Phaser.Scene {
           }
         }
       },
+      onHardImpact: (catA, catB) => {
+        // Either call can be a no-op if that cat is still cooling down from its last flinch (see
+        // Cat.playStartledSquash) — only play the sound if at least one of them actually reacted,
+        // so a single hard landing's repeated Matter collision events read as one flinch.
+        const reacted = [catA.playStartledSquash(), catB.playStartledSquash()].some(Boolean);
+        if (reacted) {
+          this.audio.playStartled();
+        }
+      },
     });
 
     this.idleSystem = new IdleSystem(this, this.audio);

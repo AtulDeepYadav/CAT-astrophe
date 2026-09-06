@@ -81,6 +81,57 @@ export class AudioSystem {
     osc.stop(now + 0.35);
   }
 
+  /** A slower, lower, quieter cousin of playIdlePurr — for a cat that's been resting so long it's dozed off. */
+  playSleepyPurr() {
+    const ctx = this.ensureContext();
+    if (!ctx) {
+      return;
+    }
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(150, now);
+    osc.frequency.exponentialRampToValueAtTime(165, now + 0.5);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.03, now + 0.2);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.1);
+
+    osc.start(now);
+    osc.stop(now + 1.15);
+  }
+
+  /** Quick startled "mrp!" blip for a cat that just took a hard knock from a fast-dropped cat. */
+  playStartled() {
+    const ctx = this.ensureContext();
+    if (!ctx) {
+      return;
+    }
+
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(680, now);
+    osc.frequency.exponentialRampToValueAtTime(920, now + 0.05);
+    osc.frequency.exponentialRampToValueAtTime(400, now + 0.11);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.12, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+
+    osc.start(now);
+    osc.stop(now + 0.14);
+  }
+
   /** Short ascending chime for activating a power-up (Yarn Ball, etc). */
   playPowerUp() {
     const ctx = this.ensureContext();

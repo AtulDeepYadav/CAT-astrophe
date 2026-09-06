@@ -39,12 +39,31 @@ export class IdleSystem {
       cat.restTimeMs += deltaMs;
       if (cat.restTimeMs >= cat.nextIdleAt) {
         this.playIdleBeat(cat);
-        cat.nextIdleAt = cat.restTimeMs + Phaser.Math.Between(REPEAT_IDLE_MIN_MS, REPEAT_IDLE_MAX_MS);
+        // A dozing cat gets a slower, more occasional beat than an awake-but-resting one — it's
+        // asleep, not fidgeting.
+        const [min, max] = cat.isDeepAsleep
+          ? [REPEAT_IDLE_MIN_MS * 2, REPEAT_IDLE_MAX_MS * 2]
+          : [REPEAT_IDLE_MIN_MS, REPEAT_IDLE_MAX_MS];
+        cat.nextIdleAt = cat.restTimeMs + Phaser.Math.Between(min, max);
       }
     }
   }
 
   private playIdleBeat(cat: Cat) {
+    if (cat.isDeepAsleep) {
+      this.audio.playSleepyPurr();
+      // A slow, soft breathing rise-and-fall rather than the awake "boop" — smaller amplitude,
+      // much longer duration, reads as sleeping rather than reacting to something.
+      this.scene.tweens.add({
+        targets: cat,
+        scale: cat.scale * 1.035,
+        duration: 900,
+        yoyo: true,
+        ease: 'Sine.easeInOut',
+      });
+      return;
+    }
+
     this.audio.playIdlePurr();
 
     // A gentle uniform scale bounce rather than a squash/stretch — the real character art

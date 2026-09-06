@@ -6,6 +6,16 @@ import { animFrameTextureKey, hasAnimationFrames, idleLoopForLevel, idleLoopTota
 const GOLDEN_TINT = 0xffd873;
 /** Matter body speed below which a cat counts as "resting" — matches IdleSystem's own threshold. */
 const RESTING_SPEED_THRESHOLD = 0.4;
+/** How long a cat has to rest undisturbed before it's dozed off — see isDeepAsleep. */
+const DEEP_SLEEP_MS = 25000;
+/** Mostly eyes-closed (the 'blink' frame standing in for "asleep"), with just a brief eye-open
+ * flash — the inverse proportions of the normal idle loop, using the same two frames every
+ * animated level already has. No new art needed for a cat to visibly read as asleep. */
+const SLEEPY_IDLE_LOOP: { frame: AnimFrame; holdMs: number }[] = [
+  { frame: 'blink', holdMs: 2200 },
+  { frame: 'idle', holdMs: 300 },
+];
+const SLEEPY_IDLE_TOTAL_MS = SLEEPY_IDLE_LOOP.reduce((sum, step) => sum + step.holdMs, 0);
 
 /**
  * A dropped cat: a circular Matter body wrapped in a sprite, tagged with its level.
@@ -30,6 +40,10 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
   /** Time accumulated while resting, driving the continuous idle loop; reset the moment the cat moves. */
   private animLoopMs = 0;
   private animFrame: AnimFrame = 'idle';
+  /** A single hard landing can register several Matter collision events in quick succession as
+   * the body settles/bounces — this debounces playStartledSquash so that reads as one flinch,
+   * not a stutter of them. */
+  private startledCooldownMs = 0;
 
   constructor(
     world: Phaser.Physics.Matter.World,
@@ -105,9 +119,17 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
   preUpdate(time: number, delta: number) {
     super.preUpdate(time, delta);
     this.glow?.setPosition(this.x, this.y);
+    if (this.startledCooldownMs > 0) {
+      this.startledCooldownMs -= delta;
+    }
     if (this.animated) {
       this.updateIdleAnimation(delta);
     }
+  }
+
+  /** True once a cat has rested undisturbed long enough to have dozed off — see DEEP_SLEEP_MS. */
+  get isDeepAsleep(): boolean {
+    return this.restTimeMs >= DEEP_SLEEP_MS;
   }
 
   /**
@@ -115,7 +137,9 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
    * -> idle for the Kitten, ~2s, seamless; idle -> blink -> idle for everyone else) — separate
    * from IdleSystem's rarer purr/bounce beat. Only plays once settled: cycling a facing-forward
    * pose while the body is still tumbling from a drop/merge would just look glitchy against the
-   * physics rotation.
+   * physics rotation. A cat left resting long enough switches to a slower, mostly-eyes-closed
+   * loop (see isDeepAsleep) — the same two frames, held in the opposite proportions, is enough to
+   * read as "asleep" without needing dedicated sleepy art.
    */
   private updateIdleAnimation(delta: number) {
     const speed = (this.body as unknown as { speed: number }).speed;
@@ -126,6 +150,19 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
     }
 
     this.animLoopMs += delta;
+    if (this.isDeepAsleep) {
+      const elapsed = this.animLoopMs % SLEEPY_IDLE_TOTAL_MS;
+      let asleepAcc = 0;
+      for (const step of SLEEPY_IDLE_LOOP) {
+        asleepAcc += step.holdMs;
+        if (elapsed < asleepAcc) {
+          this.setAnimFrame(step.frame);
+          return;
+        }
+      }
+      return;
+    }
+
     const totalMs = idleLoopTotalMs(this.level);
     const elapsed = this.animLoopMs % totalMs;
     let acc = 0;
@@ -144,6 +181,47 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
     }
     this.animFrame = frame;
     this.setTexture(animFrameTextureKey(this.level, frame));
+  }
+
+  /**
+   * A quick, snappy squash-and-recover for a cat that just took a hard knock from a fast-dropped
+   * cat landing on it — distinct from IdleSystem's slow, gentle "boop" so a startle actually
+   * reads as different from ambient idling. Purely a motion effect (no new art): a fast
+   * horizontal squash sells "flinch" on any of this cat's existing poses.
+   */
+  /** Returns false (no-op) if this cat is still cooling down from its last flinch — lets a
+   * caller batching two cats' reactions together (see GameScene's onHardImpact) know whether to
+   * bother with the accompanying sound at all. */
+  playStartledSquash(): boolean {
+    if (this.startledCooldownMs > 0) {
+      return false;
+    }
+    this.startledCooldownMs = 300;
+    this.scene.tweens.killTweensOf(this);
+    const baseScale = (this.radius * 2) / this.height;
+    this.scene.tweens.add({
+      targets: this,
+      scaleX: baseScale * 1.22,
+      scaleY: baseScale * 0.82,
+      duration: 70,
+      yoyo: true,
+      ease: 'Sine.easeOut',
+      onComplete: () => this.setScale(baseScale),
+    });
+    return true;
+  }
+
+  /** A bigger, bouncier entrance than the physics "pop" velocity alone gives a freshly merged cat. */
+  playBirthBounce() {
+    const targetScale = (this.radius * 2) / this.height;
+    this.setScale(targetScale * 0.55);
+    this.scene.tweens.add({
+      targets: this,
+      scaleX: targetScale,
+      scaleY: targetScale,
+      duration: 320,
+      ease: 'Back.easeOut',
+    });
   }
 
   destroy(fromScene?: boolean) {

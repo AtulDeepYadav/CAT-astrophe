@@ -10,9 +10,18 @@ export interface MergeResult {
   isGolden: boolean;
 }
 
+/** Combined speed (bodyA.speed + bodyB.speed) above which two cats colliding counts as a "hard"
+ * knock worth a startled reaction — well above the ~1-3 range normal drops/settling produce,
+ * comfortably below the ~18+ a cat dropped from height actually lands at (measured directly). */
+const HARD_IMPACT_SPEED = 9;
+
 export interface MergeSystemOptions {
   /** Called once per successful merge, after the new cat has been spawned. */
   onMerge: (result: MergeResult) => void;
+  /** Called for a hard collision between two cats that didn't result in a merge — a fast-dropped
+   * cat landing on an already-resting one, say. Not called for pairs that merged instead (they're
+   * destroyed immediately, and a merge already gets its own, bigger, celebratory feedback). */
+  onHardImpact?: (catA: Cat, catB: Cat) => void;
 }
 
 /**
@@ -41,14 +50,16 @@ export function registerMergeSystem(
       if (!(catA instanceof Cat) || !(catB instanceof Cat)) {
         continue;
       }
-      if (consumed.has(catA) || consumed.has(catB)) {
+
+      const willMerge =
+        !consumed.has(catA) && !consumed.has(catB) && catA.level === catB.level && catA.level < MAX_CAT_LEVEL;
+      if (!willMerge) {
+        const speedA = (catA.body as unknown as { speed: number }).speed;
+        const speedB = (catB.body as unknown as { speed: number }).speed;
+        if (speedA + speedB >= HARD_IMPACT_SPEED) {
+          options.onHardImpact?.(catA, catB);
+        }
         continue;
-      }
-      if (catA.level !== catB.level) {
-        continue;
-      }
-      if (catA.level >= MAX_CAT_LEVEL) {
-        continue; // Lions are the top of the chain in the MVP — they just sit together.
       }
 
       consumed.add(catA);
@@ -65,6 +76,7 @@ export function registerMergeSystem(
 
       const merged = new Cat(world, midX, midY, newLevel);
       merged.setVelocity(0, -1.5); // small pop so the merge reads as an event, not a swap
+      merged.playBirthBounce();
 
       options.onMerge({ newLevel, x: midX, y: midY, isGolden });
     }
