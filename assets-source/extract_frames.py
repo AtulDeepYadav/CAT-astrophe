@@ -147,11 +147,12 @@ LABEL_FRACTION_OVERRIDE = {2: 0.005}
 TOL_OVERRIDE = {10: 3, 6: 4, 4: 6}
 
 # The default border palette was coarsened (quantize 4 -> 16) specifically so Celestial Cat's
-# busy starry-sky border wouldn't blow the palette up too large. That coarser palette is too
-# imprecise for House Cat at any tolerance — it can't find a clean row1/row2 band split at all,
-# and blurs away the fine tol=4 vs. tol=6-ish distinctions that keeping its fur intact depends on.
-# The finer (original) quantize=4 palette fixes both.
-QUANTIZE_OVERRIDE = {4: 4}
+# busy starry-sky border wouldn't blow the palette up too large. That coarser palette turned out
+# too imprecise for several other levels' own sheets (2, 3, 4, 5, 6) — none of them could find a
+# clean row1/row2 band split at all with it. The finer (original) quantize=4 palette fixes every
+# one of them (verified individually) with no observed downside for the levels that already
+# worked at quantize=16.
+QUANTIZE_OVERRIDE = {2: 4, 3: 4, 4: 4, 5: 4, 6: 4}
 
 # The Lion sheet's hero image is unusually tall (that mane needs room), leaving no clean gap
 # between the hero and row1 for the generic band/column detector to find — row1 there was
