@@ -2,7 +2,7 @@
 
 **Tagline:** Drop. Merge. Roar.
 **Genre:** Physics-based vertical merge game (Suika-like) with an evolving world.
-**Platform:** Phaser 3 + TypeScript web build → wrapped with Capacitor for iOS/Android app stores. Also playable directly as a mobile-web/PWA build with zero extra work.
+**Platform:** Phaser 3 + TypeScript web build → wrapped as a Trusted Web Activity for the Android/Play Store submission (see [ANDROID_PACKAGING.md](ANDROID_PACKAGING.md) for why TWA over Capacitor, and the concrete setup steps). Also playable directly as a mobile-web/PWA build with zero extra work.
 **Art pipeline:** Placeholder shape-sprites first (prove the loop feels good) → swap in illustrated cats once the core game is fun.
 
 ---
@@ -30,7 +30,7 @@ We build V1 first, play it, and only move to V2 once V1 is actually fun on a pho
 | Physics | **Matter.js** (via Phaser's `matter` physics plugin) | Circular bodies, gravity, restitution (bounce), collision events — exactly what merge-detection needs. |
 | Language | **TypeScript** | Cat/level data, merge rules, and power-up state are all easy to get subtly wrong in plain JS; types catch it early. |
 | Build tool | **Vite** | Fast dev server with hot reload — critical for iterating on physics "feel," where you want to tweak a bounce value and see it in <1s. |
-| Native wrapper | **Capacitor** | Wraps the same web build into a real iOS/Android app (native splash screen, app icon, store submission) without a second codebase. Added in Phase 5, not before — no point wrapping a game that isn't fun yet. |
+| Native wrapper | **Trusted Web Activity (Bubblewrap)**, revised from the original Capacitor plan — see [ANDROID_PACKAGING.md](ANDROID_PACKAGING.md) | Wraps the same Vercel-hosted web build for Play Store submission with no second codebase to maintain and no store review needed for ordinary content updates — the game has no native-only requirement (camera, Bluetooth, background services) that would justify Capacitor's extra maintenance surface. |
 | UI overlay (menus/HUD) | Phaser's own DOM/UI layer (no React) | The doc mentions React, but for a single-screen game with a HUD, score, and a few menus, Phaser's built-in UI is less machinery than bolting on React for a canvas-first game. If the Collection Book / cosmetics screens in V3-V4 get complex, we can revisit adding a thin React layer then — not a day-one requirement. |
 | Audio | Phaser's built-in sound manager (Web Audio) | No extra library needed for one-shot SFX + background loops. |
 | Version control | Git (already initialized at project root) | Commit per milestone, tag each version (v1-mvp, v2-feel, etc.) |
