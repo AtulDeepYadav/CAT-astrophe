@@ -27,6 +27,7 @@ import {
   portraitTextureKeyForLevel,
   silhouetteTextureKeyForLevel,
   textureKeyForLevel,
+  tierColor,
 } from '../config/catData';
 import type { WorldZoneKey } from '../config/worldZones';
 import { BG_FRAME_COUNT, backgroundFrameTextureKey, zoneForLevel } from '../config/worldZones';
@@ -126,7 +127,13 @@ export class GameScene extends Phaser.Scene {
 
   private collectionBookContainer!: Phaser.GameObjects.Container;
   private collectionBookTab: CollectionBookTab = 'cats';
-  private collectionTabButtons: { key: CollectionBookTab; text: Phaser.GameObjects.Text }[] = [];
+  private collectionTabButtons: {
+    key: CollectionBookTab;
+    text: Phaser.GameObjects.Text;
+    pill: Phaser.GameObjects.Graphics;
+    pillW: number;
+    pillH: number;
+  }[] = [];
   private catsTabContainer!: Phaser.GameObjects.Container;
   private statsTabContainer!: Phaser.GameObjects.Container;
   private styleTabContainer!: Phaser.GameObjects.Container;
@@ -1163,8 +1170,16 @@ export class GameScene extends Phaser.Scene {
   private buildCollectionBookOverlay(): Phaser.GameObjects.Container {
     const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1410, 0.97).setOrigin(0, 0);
 
+    // A gradient header strip (same trick as the HUD score bar) rather than the title/tabs
+    // floating directly on the flat dark backdrop — gives the book a real "cover" to open past.
+    const header = this.add.graphics();
+    header.fillGradientStyle(0x4a3626, 0x4a3626, 0x2b2018, 0x2b2018, 1);
+    header.fillRect(0, 0, GAME_WIDTH, 96);
+    header.fillStyle(0x000000, 0.25);
+    header.fillRect(0, 92, GAME_WIDTH, 4);
+
     const title = this.add
-      .text(GAME_WIDTH / 2, 40, '📖 Cat-astrophe', {
+      .text(GAME_WIDTH / 2, 32, '📖 Cat-astrophe', {
         fontFamily: FONT_FAMILY,
         fontSize: '20px',
         color: '#fdf6ec',
@@ -1177,18 +1192,24 @@ export class GameScene extends Phaser.Scene {
       { key: 'stats', label: '📊 Stats' },
       { key: 'style', label: '✨ Style' },
     ];
-    const tabX = [GAME_WIDTH * 0.2, GAME_WIDTH * 0.5, GAME_WIDTH * 0.8];
-    this.collectionTabButtons = tabDefs.map((def, i) => ({
-      key: def.key,
-      text: this.add
-        .text(tabX[i], 74, def.label, {
+    const tabX = [GAME_WIDTH * 0.18, GAME_WIDTH * 0.5, GAME_WIDTH * 0.82];
+    const tabChildren: Phaser.GameObjects.GameObject[] = [];
+    this.collectionTabButtons = tabDefs.map((def, i) => {
+      const text = this.add
+        .text(tabX[i], 70, def.label, {
           fontFamily: UI_FONT_FAMILY,
-          fontSize: '15px',
+          fontSize: '14px',
           color: '#c9bdae',
-          fontStyle: 'bold',
+          fontStyle: '700',
         })
-        .setOrigin(0.5),
-    }));
+        .setOrigin(0.5);
+      const pill = this.add.graphics();
+      pill.setPosition(tabX[i], 70);
+      const pillW = text.width + 22;
+      const pillH = 30;
+      tabChildren.push(pill, text); // pill first so it renders behind its own label
+      return { key: def.key, text, pill, pillW, pillH };
+    });
 
     this.catsTabContainer = this.buildCatsTab();
     this.statsTabContainer = this.buildStatsTab();
@@ -1204,7 +1225,7 @@ export class GameScene extends Phaser.Scene {
 
     // A real close button, not just the "tap anywhere else" hint below — matches how every other
     // overlay in the app dismisses now (a top-right corner X).
-    const closeIcon = createIconButton(this, GAME_WIDTH - 28, 40, 'close', {
+    const closeIcon = createIconButton(this, GAME_WIDTH - 28, 32, 'close', {
       radius: 16,
       theme: 'light',
       onTap: () => this.closeCollectionBook(),
@@ -1212,9 +1233,10 @@ export class GameScene extends Phaser.Scene {
 
     const container = this.add.container(0, 0, [
       overlayBg,
+      header,
       title,
       closeIcon.container,
-      ...this.collectionTabButtons.map((t) => t.text),
+      ...tabChildren,
       this.catsTabContainer,
       this.statsTabContainer,
       this.styleTabContainer,
@@ -1242,6 +1264,17 @@ export class GameScene extends Phaser.Scene {
       const x = colX[col];
       const y = gridTop + row * rowHeight;
 
+      // A rarity-tinted card behind each slot — reads at a glance even before a cat is
+      // discovered, the same way a real collection game color-codes an empty slot by rarity
+      // rather than leaving it as a plain gray blank.
+      const cardColor = tierColor(cat.tier);
+      const card = this.add.graphics();
+      card.fillStyle(0xfff6e8, 0.06);
+      card.fillRoundedRect(x - 56, y - 32, 112, 96, 14);
+      card.lineStyle(2, cardColor, 0.7);
+      card.strokeRoundedRect(x - 56, y - 32, 112, 96, 14);
+      children.push(card);
+
       const image = this.add.image(x, y, silhouetteTextureKeyForLevel(cat.level));
       const name = this.add
         .text(x, y + cellImageHeight * 0.68, '???', {
@@ -1255,7 +1288,8 @@ export class GameScene extends Phaser.Scene {
         .text(x, y + cellImageHeight * 0.68 + 14, '', {
           fontFamily: UI_FONT_FAMILY,
           fontSize: '10px',
-          color: '#c9bdae',
+          fontStyle: '700',
+          color: `#${cardColor.toString(16).padStart(6, '0')}`,
         })
         .setOrigin(0.5);
 
@@ -1268,27 +1302,37 @@ export class GameScene extends Phaser.Scene {
 
   /** Lifetime totals up top, then a scrollable-free checklist of every achievement (locked ones dimmed, name/desc still shown). */
   private buildStatsTab(): Phaser.GameObjects.Container {
-    const summary = this.add.text(GAME_WIDTH / 2, 108, '', {
+    const summaryCard = this.add.graphics();
+    summaryCard.fillStyle(0xfff6e8, 0.07);
+    summaryCard.fillRoundedRect(20, 96, GAME_WIDTH - 40, 56, 14);
+
+    const summary = this.add.text(GAME_WIDTH / 2, 124, '', {
       fontFamily: UI_FONT_FAMILY,
       fontSize: '13px',
       color: '#fdf6ec',
       align: 'center',
-      lineSpacing: 4,
+      lineSpacing: 6,
     });
-    summary.setOrigin(0.5, 0);
+    summary.setOrigin(0.5);
     summary.setName('statsSummary');
 
-    const children: Phaser.GameObjects.GameObject[] = [summary];
-    const rowTop = 200;
-    const rowHeight = 56;
+    const children: Phaser.GameObjects.GameObject[] = [summaryCard, summary];
+    const rowTop = 190;
+    const rowHeight = 58;
 
     for (let i = 0; i < ACHIEVEMENTS.length; i++) {
       const achievement = ACHIEVEMENTS[i];
       const y = rowTop + i * rowHeight;
 
-      const icon = this.add.text(36, y, achievement.icon, { fontSize: '22px' }).setOrigin(0.5);
+      const rowCard = this.add.graphics();
+      rowCard.fillStyle(0xfff6e8, i % 2 === 0 ? 0.07 : 0.03);
+      rowCard.fillRoundedRect(20, y - 24, GAME_WIDTH - 40, 48, 12);
+      rowCard.setName(`ach-card-${achievement.id}`);
+
+      const iconBg = this.add.circle(38, y, 17, 0xfff6e8, 0.1);
+      const icon = this.add.text(38, y, achievement.icon, { fontSize: '19px' }).setOrigin(0.5);
       const name = this.add
-        .text(62, y - 11, achievement.name, {
+        .text(64, y - 11, achievement.name, {
           fontFamily: UI_FONT_FAMILY,
           fontSize: '15px',
           color: '#fdf6ec',
@@ -1296,7 +1340,7 @@ export class GameScene extends Phaser.Scene {
         })
         .setOrigin(0, 0.5);
       const desc = this.add
-        .text(62, y + 11, achievement.description, {
+        .text(64, y + 11, achievement.description, {
           fontFamily: UI_FONT_FAMILY,
           fontSize: '12px',
           color: '#c9bdae',
@@ -1306,7 +1350,7 @@ export class GameScene extends Phaser.Scene {
       icon.setName(`ach-icon-${achievement.id}`);
       name.setName(`ach-name-${achievement.id}`);
       desc.setName(`ach-desc-${achievement.id}`);
-      children.push(icon, name, desc);
+      children.push(rowCard, iconBg, icon, name, desc);
     }
 
     return this.add.container(0, 0, children);
@@ -1332,6 +1376,10 @@ export class GameScene extends Phaser.Scene {
       const y = rowTop + i * rowHeight;
       const cx = 56;
 
+      const rowCard = this.add.graphics();
+      rowCard.fillStyle(0xfff6e8, i % 2 === 0 ? 0.07 : 0.03);
+      rowCard.fillRoundedRect(20, y - 28, GAME_WIDTH - 40, 56, 14);
+
       const circle = this.add.circle(cx, y, 22, option.color, 1).setStrokeStyle(2, 0xfdf6ec, 0.4);
       const name = this.add
         .text(cx + 40, y - 11, option.name, {
@@ -1353,7 +1401,7 @@ export class GameScene extends Phaser.Scene {
       name.setName(`style-name-${option.id}`);
       status.setName(`style-status-${option.id}`);
       this.cosmeticSwatchBounds.push({ id: option.id, x: cx, y, radius: 26 });
-      children.push(circle, name, status);
+      children.push(rowCard, circle, name, status);
     }
 
     return this.add.container(0, 0, children);
@@ -1423,7 +1471,16 @@ export class GameScene extends Phaser.Scene {
     this.statsTabContainer.setVisible(tab === 'stats');
     this.styleTabContainer.setVisible(tab === 'style');
     for (const button of this.collectionTabButtons) {
-      button.text.setColor(button.key === tab ? '#ffd873' : '#c9bdae');
+      const active = button.key === tab;
+      button.text.setColor(active ? '#3a2b22' : '#c9bdae');
+      button.pill.clear();
+      if (active) {
+        button.pill.fillGradientStyle(0xffe9a8, 0xffe9a8, 0xffbe3d, 0xffbe3d, 1);
+        button.pill.fillRoundedRect(-button.pillW / 2, -button.pillH / 2, button.pillW, button.pillH, button.pillH / 2);
+      } else {
+        button.pill.fillStyle(0xfff6e8, 0.08);
+        button.pill.fillRoundedRect(-button.pillW / 2, -button.pillH / 2, button.pillW, button.pillH, button.pillH / 2);
+      }
     }
   }
 

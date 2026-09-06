@@ -6,6 +6,25 @@
 /** Rarity tier shown as a small badge in the Collection Book, per the doc's ranking table. */
 export type CatTier = 'Common' | 'Uncommon' | 'Rare' | 'Epic' | 'Apex' | 'Legendary' | 'Mythic' | 'Ultimate';
 
+/** One accent color per rarity tier — used as each Collection Book card's border/glow so rarity
+ * reads at a glance (a real collection-game convention) instead of only being spelled out in the
+ * small tier label underneath. Undiscovered cats still show their tier's color (just muted), so
+ * an empty slot already hints at what's waiting there. */
+const TIER_COLORS: Record<CatTier, number> = {
+  Common: 0xb8a98f,
+  Uncommon: 0x6fbf73,
+  Rare: 0x5aa7e0,
+  Epic: 0xa877e0,
+  Apex: 0xe0813f,
+  Legendary: 0xffd23f,
+  Mythic: 0xe95fb0,
+  Ultimate: 0x8a6ae0,
+};
+
+export function tierColor(tier: CatTier): number {
+  return TIER_COLORS[tier];
+}
+
 export interface CatLevelData {
   level: number;
   name: string;
