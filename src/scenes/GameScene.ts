@@ -45,6 +45,7 @@ import { todayKey, todaysModifier } from '../config/dailyChallenges';
 import { LeaderboardSystem } from '../systems/LeaderboardSystem';
 import { DailyChallengeSystem } from '../systems/DailyChallengeSystem';
 import { SettingsSystem } from '../systems/SettingsSystem';
+import { OnboardingSystem } from '../systems/OnboardingSystem';
 
 /** Minimum time between drops, so spam-tapping can't stack cats on top of each other instantly. */
 const DROP_COOLDOWN_MS = 350;
@@ -134,6 +135,8 @@ export class GameScene extends Phaser.Scene {
   // without re-running the constructor. Without this, a mute toggle made in MenuScene (which
   // *does* get freshly constructed each time) would never be seen by an already-alive GameScene.
   private settings!: SettingsSystem;
+  private onboarding!: OnboardingSystem;
+  private onboardingContainer!: Phaser.GameObjects.Container;
 
   private dropPreviewImage!: Phaser.GameObjects.Image;
   private dropPreviewGlow!: Phaser.GameObjects.Image;
@@ -329,6 +332,9 @@ export class GameScene extends Phaser.Scene {
     this.gameOverContainer = this.buildGameOverOverlay();
     this.collectionBookContainer = this.buildCollectionBookOverlay();
     this.pauseContainer = this.buildPauseOverlay();
+    this.onboarding = new OnboardingSystem();
+    this.onboardingContainer = this.buildOnboardingOverlay();
+    this.onboardingContainer.setVisible(!this.onboarding.hasSeenIntro);
 
     registerMergeSystem(this.matter.world, {
       onMerge: ({ newLevel, x, y, isGolden }) => {
@@ -442,7 +448,7 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (this.isGameOver || this.isPaused) {
+      if (this.isGameOver || this.isPaused || this.onboardingContainer.visible) {
         return;
       }
 
@@ -491,14 +497,20 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (this.isGameOver || this.isPaused || this.suppressNextDrop || this.collectionBookContainer.visible) {
+      if (
+        this.isGameOver ||
+        this.isPaused ||
+        this.suppressNextDrop ||
+        this.collectionBookContainer.visible ||
+        this.onboardingContainer.visible
+      ) {
         return;
       }
       this.updateDropPreviewPosition(pointer.x);
     });
 
     this.input.on('pointerup', () => {
-      if (this.isGameOver || this.isPaused || this.collectionBookContainer.visible) {
+      if (this.isGameOver || this.isPaused || this.collectionBookContainer.visible || this.onboardingContainer.visible) {
         return;
       }
       if (this.suppressNextDrop) {
@@ -937,6 +949,65 @@ export class GameScene extends Phaser.Scene {
     });
 
     const container = this.add.container(0, 0, [overlayBg, title, resumeButton, this.muteButtonText, restartButton, menuButton]);
+    container.setDepth(1000);
+    container.setVisible(false);
+    return container;
+  }
+
+  /**
+   * First-launch tips — shown once, ever (OnboardingSystem), before the board has a chance to
+   * fill up on someone who's never played a merge game like this before. Four one-line
+   * callouts on a single card rather than a multi-step wizard: simpler to build correctly and
+   * just as fast to read.
+   */
+  private buildOnboardingOverlay(): Phaser.GameObjects.Container {
+    const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1410, 0.92).setOrigin(0, 0);
+
+    const title = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 180, '🐾 How to Play', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '24px',
+        fontStyle: '800',
+        color: '#fff6e8',
+      })
+      .setOrigin(0.5);
+
+    const tips = [
+      '🐱  Drag to aim, tap to drop a cat',
+      '🔗  Two of the same cat merge into the next one up',
+      '⚠️  Don’t let cats pile up above the danger line',
+      '💖  Fill the Purr Meter for a free Yarn Ball',
+    ];
+    const tipTexts = tips.map((tip, i) =>
+      this.add
+        .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 100 + i * 44, tip, {
+          fontFamily: FONT_FAMILY,
+          fontSize: '15px',
+          color: '#fdf6ec',
+          align: 'center',
+          wordWrap: { width: GAME_WIDTH - 70 },
+        })
+        .setOrigin(0.5),
+    );
+
+    const gotItButton = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 150, "Let's go!", {
+        fontFamily: FONT_FAMILY,
+        fontSize: '18px',
+        fontStyle: '700',
+        color: '#3a2b22',
+        backgroundColor: '#ffd873',
+        padding: { x: 28, y: 12 },
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    gotItButton.on('pointerdown', (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
+      event.stopPropagation();
+      this.onboarding.markSeen();
+      this.onboardingContainer.setVisible(false);
+    });
+
+    const container = this.add.container(0, 0, [overlayBg, title, ...tipTexts, gotItButton]);
     container.setDepth(1000);
     container.setVisible(false);
     return container;
