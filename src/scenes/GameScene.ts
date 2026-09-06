@@ -49,6 +49,7 @@ import { SettingsSystem } from '../systems/SettingsSystem';
 import { OnboardingSystem } from '../systems/OnboardingSystem';
 import { CurrencySystem, fishEarnedForScore } from '../systems/CurrencySystem';
 import { ensureAmbientMusic } from '../systems/MusicSystem';
+import { THEME, createButton, createIconButton, createPanel, drawIconGlyph, setContainerInteractive } from '../ui/uiKit';
 import { REVIVE_COST_FISH } from '../config/gameConfig';
 import {
   openFacebookShare,
@@ -139,7 +140,7 @@ export class GameScene extends Phaser.Scene {
 
   private pauseButtonBounds = { x: 0, y: 0, radius: 22 };
   private pauseContainer!: Phaser.GameObjects.Container;
-  private muteButtonText!: Phaser.GameObjects.Text;
+  private setMuteButtonLabel!: (label: string) => void;
   private isPaused = false;
   // Re-read fresh in create(), not a field initializer here — a field initializer only runs once
   // at Scene construction (game boot), but scene.start()/restart() reuse the same Scene object
@@ -171,10 +172,10 @@ export class GameScene extends Phaser.Scene {
   private newBestBanner!: Phaser.GameObjects.Text;
   private reviveOfferContainer!: Phaser.GameObjects.Container;
   private reviveCostText!: Phaser.GameObjects.Text;
-  private reviveContinueButton!: Phaser.GameObjects.Text;
   // One revive offer per run, spent or declined — see triggerGameOver/showReviveOffer.
   private hasUsedRevive = false;
-  private purrBarFill!: Phaser.GameObjects.Rectangle;
+  private purrBarFill!: Phaser.GameObjects.Graphics;
+  private purrBarTrack!: Phaser.GameObjects.Graphics;
   private purrBarY = 0;
   private purrBarLeft = 0;
   private purrBarWidth = 0;
@@ -366,9 +367,21 @@ export class GameScene extends Phaser.Scene {
     this.pauseContainer = this.buildPauseOverlay();
     this.onboarding = new OnboardingSystem();
     this.onboardingContainer = this.buildOnboardingOverlay();
+    // Every one of these overlays lives in the display list for the whole scene session, only
+    // ever toggled via setVisible — which does NOT disable input on their interactive children
+    // (see setContainerInteractive's own doc comment for the real bug this caused live: a hidden
+    // overlay's button could silently swallow a tap meant for whichever overlay actually is
+    // showing). All five start fully non-interactive; each open*/close* method below re-enables
+    // its own and disables it again on close.
+    setContainerInteractive(this.gameOverContainer, false);
+    setContainerInteractive(this.reviveOfferContainer, false);
+    setContainerInteractive(this.collectionBookContainer, false);
+    setContainerInteractive(this.pauseContainer, false);
+    setContainerInteractive(this.onboardingContainer, false);
     const showOnboarding = !this.onboarding.hasSeenIntro;
     this.onboardingContainer.setVisible(showOnboarding);
     if (showOnboarding) {
+      setContainerInteractive(this.onboardingContainer, true);
       this.pushModalHistoryEntry();
     }
 
@@ -599,28 +612,23 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    // Collection Book button, top-right of the header.
-    this.collectionButtonBounds = { x: GAME_WIDTH - 30, y: HEADER_TEXT_HEIGHT / 2, radius: 24 };
-    this.add
-      .text(this.collectionButtonBounds.x, this.collectionButtonBounds.y, '📖', {
-        fontSize: '24px',
-        stroke: '#fdf6ec',
-        strokeThickness: 4,
-      })
-      .setOrigin(0.5);
+    // Collection Book button, top-right of the header. A drawn glyph (see uiKit's drawIconGlyph
+    // doc comment for why this isn't a fully Phaser-interactive createIconButton) — the actual
+    // tap handling stays in the single ordered pointerdown dispatcher below.
+    this.collectionButtonBounds = { x: GAME_WIDTH - 30, y: HEADER_TEXT_HEIGHT / 2, radius: 22 };
+    drawIconGlyph(this, this.collectionButtonBounds.x, this.collectionButtonBounds.y, 'book', {
+      radius: this.collectionButtonBounds.radius,
+      theme: 'light',
+    });
 
     // Pause button — grouped with Collection Book on the "menu actions" side of the header,
     // leaving the Big Cats stat alone on the left. Unlike the Collection Book (a quick-glance
     // overlay that leaves the board running underneath), this one actually stops the simulation.
     this.pauseButtonBounds = { x: GAME_WIDTH - 30 - 55, y: HEADER_TEXT_HEIGHT / 2, radius: 22 };
-    this.add
-      .text(this.pauseButtonBounds.x, this.pauseButtonBounds.y, '⏸', {
-        fontSize: '22px',
-        color: '#3a2b22',
-        stroke: '#fdf6ec',
-        strokeThickness: 4,
-      })
-      .setOrigin(0.5);
+    drawIconGlyph(this, this.pauseButtonBounds.x, this.pauseButtonBounds.y, 'pause', {
+      radius: this.pauseButtonBounds.radius,
+      theme: 'light',
+    });
   }
 
   private refreshBigCatText() {
@@ -637,12 +645,26 @@ export class GameScene extends Phaser.Scene {
     const radius = 16;
     const width = PANEL_RIGHT - PANEL_LEFT;
 
+    // A soft shadow beneath the whole panel — separates it from the world backdrop behind it the
+    // same way every other card/button in the app now does, instead of the panel just sitting
+    // flush against the background with only its border to read as "in front."
+    graphics.fillStyle(0x1a0f06, 0.22);
+    graphics.fillRoundedRect(PANEL_LEFT, PANEL_TOP + 4, width, PANEL_BOTTOM - PANEL_TOP, radius);
+
     // Rounded outer corners, square where the score bar meets the arena — a flat seam there
-    // reads as one continuous panel rather than a rounded rect sitting inside another.
-    graphics.fillStyle(0xffc93c, 1);
+    // reads as one continuous panel rather than a rounded rect sitting inside another. A vertical
+    // gradient (not the old flat fill) plus a glossy top sheen match every button/panel elsewhere.
+    graphics.fillGradientStyle(0xffe9a0, 0xffe9a0, 0xffbe3d, 0xffbe3d, 1);
     graphics.fillRoundedRect(PANEL_LEFT, PANEL_TOP, width, PANEL_DIVIDER_Y - PANEL_TOP, {
       tl: radius,
       tr: radius,
+      bl: 0,
+      br: 0,
+    });
+    graphics.fillStyle(0xffffff, 0.25);
+    graphics.fillRoundedRect(PANEL_LEFT + 3, PANEL_TOP + 3, width - 6, (PANEL_DIVIDER_Y - PANEL_TOP) * 0.5, {
+      tl: radius - 2,
+      tr: radius - 2,
       bl: 0,
       br: 0,
     });
@@ -870,19 +892,43 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0, 0.5);
 
-    this.add.rectangle(this.purrBarLeft, y, this.purrBarWidth, PURR_BAR_HEIGHT, 0x5c3d2e, 0.35).setOrigin(0, 0);
-    this.purrBarFill = this.add.rectangle(this.purrBarLeft, y, 0, PURR_BAR_HEIGHT, 0xff4f9e, 1).setOrigin(0, 0);
+    this.purrBarTrack = this.add.graphics();
+    this.purrBarTrack.fillStyle(0x5c3d2e, 0.35);
+    this.purrBarTrack.fillRoundedRect(this.purrBarLeft, y, this.purrBarWidth, PURR_BAR_HEIGHT, PURR_BAR_HEIGHT / 2);
+
+    // A pill (rounded-rect) fill rather than the old hard-edged rectangle bar — matches the same
+    // rounded language as every button/panel elsewhere. Redrawn on refresh rather than resized
+    // (Phaser Graphics has no cheap "just change the width" like a Rectangle does), which is fine
+    // for one small shape updated a few times a second at most.
+    this.purrBarFill = this.add.graphics();
   }
 
   private refreshPurrBar() {
-    this.purrBarFill.width = this.purrBarWidth * this.purrMeter.percent;
+    const fillColor = this.purrMeter.isReady ? 0xfff066 : 0xff4f9e;
+    const width = Math.max(PURR_BAR_HEIGHT, this.purrBarWidth * this.purrMeter.percent);
+    this.purrBarFill.clear();
+    if (this.purrMeter.percent > 0) {
+      // A soft glow behind the fill once ready, drawn first so the crisp fill sits on top of it —
+      // reads as "charged and waiting," not just a color swap.
+      if (this.purrMeter.isReady) {
+        this.purrBarFill.fillStyle(0xfff066, 0.35);
+        this.purrBarFill.fillRoundedRect(
+          this.purrBarLeft - 2,
+          this.purrBarY - 2,
+          width + 4,
+          PURR_BAR_HEIGHT + 4,
+          PURR_BAR_HEIGHT / 2 + 2,
+        );
+      }
+      this.purrBarFill.fillStyle(fillColor, 1);
+      this.purrBarFill.fillRoundedRect(this.purrBarLeft, this.purrBarY, width, PURR_BAR_HEIGHT, PURR_BAR_HEIGHT / 2);
+    }
 
     if (this.purrMeter.isReady) {
-      this.purrBarFill.setFillStyle(0xfff066, 1);
       if (!this.tweens.isTweening(this.purrBarFill)) {
         this.tweens.add({
           targets: this.purrBarFill,
-          alpha: 0.5,
+          alpha: 0.55,
           duration: 260,
           yoyo: true,
           repeat: -1,
@@ -891,7 +937,6 @@ export class GameScene extends Phaser.Scene {
     } else {
       this.tweens.killTweensOf(this.purrBarFill);
       this.purrBarFill.setAlpha(1);
-      this.purrBarFill.setFillStyle(0xff4f9e, 1);
     }
   }
 
@@ -919,6 +964,7 @@ export class GameScene extends Phaser.Scene {
     this.isPaused = true;
     this.matter.world.pause();
     this.pauseContainer.setVisible(true);
+    setContainerInteractive(this.pauseContainer, true);
     this.pushModalHistoryEntry();
   }
 
@@ -928,6 +974,7 @@ export class GameScene extends Phaser.Scene {
     this.isPaused = false;
     this.matter.world.resume();
     this.pauseContainer.setVisible(false);
+    setContainerInteractive(this.pauseContainer, false);
     if (!fromBackButton) {
       this.consumeModalHistoryEntry();
     }
@@ -936,6 +983,7 @@ export class GameScene extends Phaser.Scene {
   private dismissOnboarding(fromBackButton = false) {
     this.onboarding.markSeen();
     this.onboardingContainer.setVisible(false);
+    setContainerInteractive(this.onboardingContainer, false);
     if (!fromBackButton) {
       this.consumeModalHistoryEntry();
     }
@@ -990,7 +1038,7 @@ export class GameScene extends Phaser.Scene {
     const nextMuted = !this.settings.muted;
     this.settings.setMuted(nextMuted);
     this.audio.setMuted(nextMuted);
-    this.muteButtonText.setText(nextMuted ? '🔇 Sound: Off' : '🔊 Sound: On');
+    this.setMuteButtonLabel(nextMuted ? '🔇 Sound: Off' : '🔊 Sound: On');
   }
 
   /**
@@ -1000,50 +1048,57 @@ export class GameScene extends Phaser.Scene {
    * away without the board filling up while they're gone.
    */
   private buildPauseOverlay(): Phaser.GameObjects.Container {
-    const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1410, 0.92).setOrigin(0, 0);
+    const centerX = GAME_WIDTH / 2;
+    const centerY = GAME_HEIGHT / 2;
+    const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1410, 0.85).setOrigin(0, 0);
+    const panel = createPanel(this, centerX, centerY, 300, 380, { radius: 28 });
 
     const title = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 160, '⏸ Paused', {
+      .text(centerX, centerY - 150, '⏸ Paused', {
         fontFamily: FONT_FAMILY,
         fontSize: '28px',
         fontStyle: '800',
-        color: '#fff6e8',
+        color: '#3a2b22',
       })
       .setOrigin(0.5);
 
-    const makeButton = (y: number, label: string, color: string, onTap: () => void) => {
-      const button = this.add
-        .text(GAME_WIDTH / 2, y, label, {
-          fontFamily: FONT_FAMILY,
-          fontSize: '18px',
-          fontStyle: '700',
-          color: '#3a2b22',
-          backgroundColor: color,
-          padding: { x: 24, y: 12 },
-        })
-        .setOrigin(0.5)
-        .setInteractive({ useHandCursor: true });
-      button.on('pointerdown', (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
-        event.stopPropagation();
-        onTap();
-      });
-      return button;
-    };
-
-    const resumeButton = makeButton(GAME_HEIGHT / 2 - 80, '▶  Resume', '#ffd873', () => this.closePause());
-    this.muteButtonText = makeButton(GAME_HEIGHT / 2 - 20, this.settings.muted ? '🔇 Sound: Off' : '🔊 Sound: On', '#a7d8ff', () =>
-      this.toggleMute(),
+    const resume = createButton(this, centerX, centerY - 70, '▶  Resume', THEME.primary, {
+      minWidth: 220,
+      onTap: () => this.closePause(),
+    });
+    const muteBtn = createButton(
+      this,
+      centerX,
+      centerY - 5,
+      this.settings.muted ? '🔇 Sound: Off' : '🔊 Sound: On',
+      THEME.info,
+      { fontSize: 17, minWidth: 220, onTap: () => this.toggleMute() },
     );
-    const restartButton = makeButton(GAME_HEIGHT / 2 + 40, '↻  Restart', '#ffe6a7', () => {
-      this.closePause();
-      this.scene.restart({ mode: this.mode });
+    this.setMuteButtonLabel = muteBtn.setLabel;
+    const restart = createButton(this, centerX, centerY + 60, '↻  Restart', THEME.gold, {
+      minWidth: 220,
+      onTap: () => {
+        this.closePause();
+        this.scene.restart({ mode: this.mode });
+      },
     });
-    const menuButton = makeButton(GAME_HEIGHT / 2 + 100, '🏠  Menu', '#c9b6f0', () => {
-      this.closePause();
-      this.scene.start('Menu');
+    const menu = createButton(this, centerX, centerY + 125, '🏠  Menu', THEME.calm, {
+      minWidth: 220,
+      onTap: () => {
+        this.closePause();
+        this.scene.start('Menu');
+      },
     });
 
-    const container = this.add.container(0, 0, [overlayBg, title, resumeButton, this.muteButtonText, restartButton, menuButton]);
+    const container = this.add.container(0, 0, [
+      overlayBg,
+      panel,
+      title,
+      resume.container,
+      muteBtn.container,
+      restart.container,
+      menu.container,
+    ]);
     container.setDepth(1000);
     container.setVisible(false);
     return container;
@@ -1056,14 +1111,17 @@ export class GameScene extends Phaser.Scene {
    * just as fast to read.
    */
   private buildOnboardingOverlay(): Phaser.GameObjects.Container {
-    const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1410, 0.92).setOrigin(0, 0);
+    const centerX = GAME_WIDTH / 2;
+    const centerY = GAME_HEIGHT / 2;
+    const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1410, 0.85).setOrigin(0, 0);
+    const panel = createPanel(this, centerX, centerY, 320, 400, { radius: 28 });
 
     const title = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 180, '🐾 How to Play', {
+      .text(centerX, centerY - 160, '🐾 How to Play', {
         fontFamily: FONT_FAMILY,
         fontSize: '24px',
         fontStyle: '800',
-        color: '#fff6e8',
+        color: '#3a2b22',
       })
       .setOrigin(0.5);
 
@@ -1075,33 +1133,22 @@ export class GameScene extends Phaser.Scene {
     ];
     const tipTexts = tips.map((tip, i) =>
       this.add
-        .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 100 + i * 44, tip, {
+        .text(centerX, centerY - 90 + i * 44, tip, {
           fontFamily: FONT_FAMILY,
           fontSize: '15px',
-          color: '#fdf6ec',
+          color: '#3a2b22',
           align: 'center',
-          wordWrap: { width: GAME_WIDTH - 70 },
+          wordWrap: { width: GAME_WIDTH - 90 },
         })
         .setOrigin(0.5),
     );
 
-    const gotItButton = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 150, "Let's go!", {
-        fontFamily: FONT_FAMILY,
-        fontSize: '18px',
-        fontStyle: '700',
-        color: '#3a2b22',
-        backgroundColor: '#ffd873',
-        padding: { x: 28, y: 12 },
-      })
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true });
-    gotItButton.on('pointerdown', (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
-      event.stopPropagation();
-      this.dismissOnboarding();
+    const gotItButton = createButton(this, centerX, centerY + 155, "Let's go!", THEME.primary, {
+      minWidth: 180,
+      onTap: () => this.dismissOnboarding(),
     });
 
-    const container = this.add.container(0, 0, [overlayBg, title, ...tipTexts, gotItButton]);
+    const container = this.add.container(0, 0, [overlayBg, panel, title, ...tipTexts, gotItButton.container]);
     container.setDepth(1000);
     container.setVisible(false);
     return container;
@@ -1154,9 +1201,18 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    // A real close button, not just the "tap anywhere else" hint below — matches how every other
+    // overlay in the app dismisses now (a top-right corner X).
+    const closeIcon = createIconButton(this, GAME_WIDTH - 28, 40, 'close', {
+      radius: 16,
+      theme: 'light',
+      onTap: () => this.closeCollectionBook(),
+    });
+
     const container = this.add.container(0, 0, [
       overlayBg,
       title,
+      closeIcon.container,
       ...this.collectionTabButtons.map((t) => t.text),
       this.catsTabContainer,
       this.statsTabContainer,
@@ -1346,11 +1402,13 @@ export class GameScene extends Phaser.Scene {
 
     this.setCollectionBookTab('cats');
     this.collectionBookContainer.setVisible(true);
+    setContainerInteractive(this.collectionBookContainer, true);
     this.pushModalHistoryEntry();
   }
 
   private closeCollectionBook(fromBackButton = false) {
     this.collectionBookContainer.setVisible(false);
+    setContainerInteractive(this.collectionBookContainer, false);
     // The drop preview's golden glow reflects whatever cosmetic is now selected.
     this.updateDropPreview();
     if (!fromBackButton) {
@@ -1882,52 +1940,35 @@ export class GameScene extends Phaser.Scene {
   private buildReviveOfferOverlay(): Phaser.GameObjects.Container {
     const centerX = GAME_WIDTH / 2;
     const centerY = GAME_HEIGHT / 2;
-    const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.7).setOrigin(0, 0);
+    const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.72).setOrigin(0, 0);
+    const panel = createPanel(this, centerX, centerY, 300, 300, { radius: 28 });
 
     const title = this.add
-      .text(centerX, centerY - 90, '😿 Oh no!', {
+      .text(centerX, centerY - 95, '😿 Oh no!', {
         fontFamily: FONT_FAMILY,
         fontSize: '28px',
         fontStyle: '800',
-        color: '#ffffff',
+        color: '#3a2b22',
       })
       .setOrigin(0.5);
 
     this.reviveCostText = this.add
-      .text(centerX, centerY - 40, '', {
+      .text(centerX, centerY - 45, '', {
         fontFamily: FONT_FAMILY,
         fontSize: '16px',
-        color: '#f7ecd9',
+        color: '#6f6152',
         align: 'center',
-        wordWrap: { width: GAME_WIDTH - 80 },
+        wordWrap: { width: 260 },
       })
       .setOrigin(0.5);
 
-    this.reviveContinueButton = this.add
-      .text(centerX, centerY + 30, '▶  Continue', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '19px',
-        fontStyle: '700',
-        color: '#3a2b22',
-        backgroundColor: '#ffd873',
-        padding: { x: 26, y: 12 },
-      })
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true });
-    this.reviveContinueButton.on(
-      'pointerdown',
-      (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
-        event.stopPropagation();
-        this.acceptRevive();
-      },
-    );
+    const continueBtn = createButton(this, centerX, centerY + 30, '▶  Continue', THEME.primary, {
+      minWidth: 200,
+      onTap: () => this.acceptRevive(),
+    });
 
     const declineButton = this.add
-      .text(centerX, centerY + 90, 'End run', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '15px',
-        color: '#c9bba3',
-      })
+      .text(centerX, centerY + 100, 'End run', { fontFamily: FONT_FAMILY, fontSize: '15px', color: '#8a7c63' })
       .setOrigin(0.5)
       .setInteractive({ useHandCursor: true });
     declineButton.on(
@@ -1940,9 +1981,10 @@ export class GameScene extends Phaser.Scene {
 
     const container = this.add.container(0, 0, [
       overlayBg,
+      panel,
       title,
       this.reviveCostText,
-      this.reviveContinueButton,
+      continueBtn.container,
       declineButton,
     ]);
     container.setDepth(1000);
@@ -1953,7 +1995,8 @@ export class GameScene extends Phaser.Scene {
   private buildGameOverOverlay(): Phaser.GameObjects.Container {
     const centerX = GAME_WIDTH / 2;
     const centerY = GAME_HEIGHT / 2;
-    const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.6).setOrigin(0, 0);
+    const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.65).setOrigin(0, 0);
+    const panel = createPanel(this, centerX, centerY, 360, 660, { radius: 30, fill: 0x241a12, fillAlpha: 0.65 });
 
     const title = this.add
       .text(centerX, centerY - 260, 'CAT-ASTROPHE!', {
@@ -2009,60 +2052,59 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    const shareButton = this.add
-      .text(centerX, centerY + 250, '🐾 Share Score', {
-        fontFamily: FONT_FAMILY,
-        fontSize: '17px',
-        fontStyle: '700',
-        color: '#3a2b22',
-        backgroundColor: '#ffd873',
-        padding: { x: 18, y: 9 },
-      })
-      .setOrigin(0.5)
-      .setInteractive({ useHandCursor: true });
-
-    // Own pointerdown handler with stopPropagation — otherwise this tap would also satisfy the
-    // scene-wide `input.once('pointerdown')` restart listener set up in triggerGameOver(),
-    // instantly restarting the run out from under the share sheet.
-    shareButton.on('pointerdown', (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
-      event.stopPropagation();
-      this.shareScore();
+    const shareButton = createButton(this, centerX, centerY + 250, '🐾 Share Score', THEME.primary, {
+      fontSize: 17,
+      minWidth: 200,
+      onTap: () => this.shareScore(),
     });
 
     // Explicit platform buttons alongside the OS share sheet above — that sheet doesn't exist at
     // all on desktop browsers, and even on mobile some players would rather tap directly than
-    // hunt through a sheet for the one app they actually want.
-    const socialRow = this.add.container(centerX, centerY + 292);
+    // hunt through a sheet for the one app they actually want. Kept as emoji (an actual brand
+    // logo would be more work to hand-draw and less recognizable than the platform's own glyph)
+    // but given the same glass-circle treatment as every other icon in the app instead of a flat
+    // rectangle chip.
+    const socialRow = this.add.container(centerX, centerY + 300);
     const socialButtons: { emoji: string; onTap: () => void }[] = [
       { emoji: '💬', onTap: () => openWhatsAppShare(this.shareContent()) },
       { emoji: '🐦', onTap: () => openTwitterShare(this.shareContent()) },
       { emoji: '📘', onTap: () => openFacebookShare(this.shareContent()) },
     ];
+    const socialRadius = 24;
     socialButtons.forEach((btn, i) => {
-      const x = (i - (socialButtons.length - 1) / 2) * 52;
-      const icon = this.add
-        .text(x, 0, btn.emoji, { fontSize: '22px', backgroundColor: '#3a2b22', padding: { x: 10, y: 6 } })
-        .setOrigin(0.5)
+      const x = (i - (socialButtons.length - 1) / 2) * 58;
+      const shadow = this.add.graphics();
+      shadow.fillStyle(0x1a0f06, 0.3);
+      shadow.fillCircle(x, 3, socialRadius);
+      const bg = this.add.graphics();
+      bg.fillStyle(0xfff6e8, 0.14);
+      bg.fillCircle(x, 0, socialRadius);
+      bg.lineStyle(1.5, 0xfff6e8, 0.4);
+      bg.strokeCircle(x, 0, socialRadius - 0.75);
+      const icon = this.add.text(x, 0, btn.emoji, { fontSize: '22px' }).setOrigin(0.5);
+      const hit = this.add
+        .rectangle(x, 0, socialRadius * 2, socialRadius * 2, 0x000000, 0)
         .setInteractive({ useHandCursor: true });
-      icon.on(
+      hit.on(
         'pointerdown',
         (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
           event.stopPropagation();
           btn.onTap();
         },
       );
-      socialRow.add(icon);
+      socialRow.add([shadow, bg, icon, hit]);
     });
 
     const container = this.add.container(0, 0, [
       overlayBg,
+      panel,
       title,
       this.newBestBanner,
       this.finalCatGlow,
       this.finalCatPortrait,
       this.finalScoreText,
       restartHint,
-      shareButton,
+      shareButton.container,
       socialRow,
     ]);
     container.setDepth(1000);
@@ -2159,6 +2201,7 @@ export class GameScene extends Phaser.Scene {
   private showReviveOffer() {
     this.reviveCostText.setText(`You have 🐟 ${this.currency.balance} — Continue for 🐟 ${REVIVE_COST_FISH}?`);
     this.reviveOfferContainer.setVisible(true);
+    setContainerInteractive(this.reviveOfferContainer, true);
     this.pushModalHistoryEntry();
   }
 
@@ -2170,6 +2213,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.hasUsedRevive = true;
     this.reviveOfferContainer.setVisible(false);
+    setContainerInteractive(this.reviveOfferContainer, false);
     this.consumeModalHistoryEntry();
     this.isGameOver = false;
 
@@ -2199,6 +2243,7 @@ export class GameScene extends Phaser.Scene {
 
   private declineRevive(fromBackButton = false) {
     this.reviveOfferContainer.setVisible(false);
+    setContainerInteractive(this.reviveOfferContainer, false);
     if (!fromBackButton) {
       this.consumeModalHistoryEntry();
     }
@@ -2245,6 +2290,7 @@ export class GameScene extends Phaser.Scene {
 
     this.finalScoreText.setText(bonusLine ? `${summary}\n${bonusLine}` : summary);
     this.gameOverContainer.setVisible(true);
+    setContainerInteractive(this.gameOverContainer, true);
     this.newBestBanner.setVisible(isNewBest).setScale(0.6).setAlpha(0);
 
     // The big portrait (see portraitTextureKeyForLevel) pops in with a bounce rather than just

@@ -12,6 +12,33 @@ import { FONT_FAMILY, UI_FONT_FAMILY } from '../config/gameConfig';
  * and then used everywhere instead of hand-rolling a new flat rectangle per screen.
  */
 
+/**
+ * A `Container.setVisible(false)` on an overlay does NOT disable input on its interactive
+ * children — each child's own `.visible` flag stays true regardless of its parent's, and Phaser's
+ * input plugin hit-tests against that child-local flag, not the ancestor chain. Confirmed live:
+ * with several overlay containers built once in create() and only ever toggled via setVisible
+ * (Pause, Revive offer, Game Over, Collection Book, Onboarding, Leaderboard), a HIDDEN overlay's
+ * button sitting at the same screen position as a currently-*visible* overlay's button could
+ * silently swallow the tap meant for the visible one — the Pause screen's Sound toggle stopped
+ * responding after the very first tap because of exactly this, with the (invisible) Revive-offer
+ * Continue button beneath it still fully interactive. Call this alongside every setVisible() on
+ * one of these overlay containers, in both directions, so only the actually-shown overlay's
+ * buttons can ever receive a tap.
+ */
+export function setContainerInteractive(container: Phaser.GameObjects.Container, enabled: boolean) {
+  const walk = (obj: Phaser.GameObjects.GameObject & { list?: Phaser.GameObjects.GameObject[] }) => {
+    if (obj.input) {
+      obj.input.enabled = enabled;
+    }
+    if (obj.list) {
+      for (const child of obj.list) {
+        walk(child as Phaser.GameObjects.GameObject & { list?: Phaser.GameObjects.GameObject[] });
+      }
+    }
+  };
+  walk(container);
+}
+
 export interface ButtonTheme {
   /** Gradient runs light (top) to this (bottom) — a believable "lit from above" surface instead
    * of a flat fill. */
@@ -120,10 +147,13 @@ export function createButton(
       shadow.fillStyle(0x1a0f06, 0.25);
       shadow.fillRoundedRect(-newW / 2, -h / 2 + 5, newW, h, radius);
       container.setSize(newW, h);
-      // Regenerates the default size-based hit area rather than hand-editing hitArea directly —
-      // see the setInteractive() call above for why this button avoids a custom hitArea/callback.
-      container.removeInteractive();
-      container.setInteractive({ useHandCursor: true });
+      // Directly update the existing centered Rectangle hitArea's bounds — removeInteractive()
+      // + setInteractive() with no explicit hitArea would regenerate Phaser's *default*
+      // size-based one instead, which is NOT centered on this button's children (see the
+      // constructor's setInteractive() call above) and would silently make the button
+      // unclickable the moment its label first changes width (confirmed live: the Pause
+      // overlay's Sound On/Off toggle stopped responding to real clicks after the first tap).
+      (container.input!.hitArea as Phaser.Geom.Rectangle).setTo(-newW / 2, -h / 2, newW, h);
     }
   };
 
@@ -210,7 +240,16 @@ export function createPanel(
   return container;
 }
 
-export type IconName = 'pause' | 'play' | 'speakerOn' | 'speakerOff' | 'close' | 'home' | 'restart' | 'trophy';
+export type IconName =
+  | 'pause'
+  | 'play'
+  | 'speakerOn'
+  | 'speakerOff'
+  | 'close'
+  | 'home'
+  | 'restart'
+  | 'trophy'
+  | 'book';
 
 /**
  * A small circular "glass" chrome button with a hand-drawn vector icon — replaces plain emoji
@@ -271,6 +310,40 @@ export function createIconButton(
   };
 
   return { container, setIcon };
+}
+
+/**
+ * The same glass-circle-plus-vector-icon visual as createIconButton, but with no interactivity of
+ * its own — for spots (GameScene's header pause/Collection Book buttons) that already have a
+ * single hand-rolled, carefully-ordered pointerdown handler doing bounds checks across several
+ * competing hit targets (purr bar, collection tabs, pause, drop-to-commit); adding a second,
+ * independent Phaser-interactive layer on top there would double-handle the same tap rather than
+ * cleanly replacing that existing dispatch.
+ */
+export function drawIconGlyph(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  icon: IconName,
+  options: { radius?: number; theme?: 'light' | 'dark' } = {},
+): Phaser.GameObjects.Container {
+  const radius = options.radius ?? 20;
+  const dark = options.theme !== 'light';
+
+  const shadow = scene.add.graphics();
+  shadow.fillStyle(0x1a0f06, 0.25);
+  shadow.fillCircle(0, 3, radius);
+
+  const bg = scene.add.graphics();
+  bg.fillStyle(dark ? 0x3a2b22 : 0xfff6e8, dark ? 0.55 : 0.9);
+  bg.fillCircle(0, 0, radius);
+  bg.lineStyle(1.5, dark ? 0xfff6e8 : 0xb69c73, dark ? 0.35 : 0.8);
+  bg.strokeCircle(0, 0, radius - 0.75);
+
+  const iconGfx = scene.add.graphics();
+  drawIcon(iconGfx, icon, radius, dark ? '#fff6e8' : '#3a2b22');
+
+  return scene.add.container(x, y, [shadow, bg, iconGfx]);
 }
 
 function drawIcon(g: Phaser.GameObjects.Graphics, icon: IconName, r: number, colorHex: string) {
@@ -340,6 +413,15 @@ function drawIcon(g: Phaser.GameObjects.Graphics, icon: IconName, r: number, col
       g.strokePath();
       g.fillRect(-s * 0.18, s * 0.2, s * 0.36, s * 0.35);
       g.fillRoundedRect(-s * 0.5, s * 0.5, s, s * 0.18, 3);
+      break;
+    }
+    case 'book': {
+      // Two open pages meeting at a center spine — reads clearly at icon size without needing
+      // any text/detail lines.
+      g.fillRoundedRect(-s, -s * 0.75, s * 0.95, s * 1.5, { tl: 3, tr: 0, bl: 3, br: 0 });
+      g.fillRoundedRect(s * 0.05, -s * 0.75, s * 0.95, s * 1.5, { tl: 0, tr: 3, bl: 0, br: 3 });
+      g.lineStyle(Math.max(1.5, r * 0.08), 0x000000, 0.2);
+      g.lineBetween(0, -s * 0.75, 0, s * 0.75);
       break;
     }
   }

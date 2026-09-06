@@ -14,7 +14,7 @@ import { exportSaveData, importSaveData } from '../systems/saveBackup';
 import { getCatData, portraitTextureKeyForLevel } from '../config/catData';
 import { shareViaWebShare } from '../systems/socialShare';
 import { ensureAmbientMusic } from '../systems/MusicSystem';
-import { THEME, bodyTextStyle, createButton, createIconButton, createPanel } from '../ui/uiKit';
+import { THEME, bodyTextStyle, createButton, createIconButton, createPanel, setContainerInteractive } from '../ui/uiKit';
 
 /**
  * Title screen — the game used to boot straight into a live round with no beat before the
@@ -159,6 +159,7 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.leaderboardContainer = this.buildLeaderboardOverlay();
+    setContainerInteractive(this.leaderboardContainer, false);
   }
 
   /** Two small side-by-side "stat chip" pills (Best Score, Fish) rather than one plain line of
@@ -339,6 +340,9 @@ export class MenuScene extends Phaser.Scene {
 
   private toggleLeaderboard(visible: boolean, fromBackButton = false) {
     this.leaderboardContainer.setVisible(visible);
+    // See setContainerInteractive's doc comment — setVisible alone doesn't disable input on an
+    // overlay's interactive children (the close icon, the share icon).
+    setContainerInteractive(this.leaderboardContainer, visible);
     if (visible) {
       this.pushModalHistoryEntry();
     } else if (!fromBackButton) {
