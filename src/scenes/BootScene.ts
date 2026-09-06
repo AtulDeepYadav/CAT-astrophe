@@ -53,7 +53,7 @@ export class BootScene extends Phaser.Scene {
       for (let frame = 1; frame <= BG_FRAME_COUNT; frame += 1) {
         this.load.image(
           backgroundFrameTextureKey(zone.key, frame),
-          `assets/backgrounds/${zone.key}-f${frame}.png`,
+          `assets/backgrounds/${zone.key}-f${frame}.webp`,
         );
       }
     }

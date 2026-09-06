@@ -1,7 +1,9 @@
 """
 Extracts the 4 looping animation frames for each world zone from the "Cat BGs" reference sheets
 the user supplied (D:\\IIM Lucknow\\Project\\Game\\Cats\\Cat BGs\\*.png) into game-ready
-440x870 PNGs at public/assets/backgrounds/<zone>-f{1..4}.png.
+440x870 WebP images at public/assets/backgrounds/<zone>-f{1..4}.webp (WebP q88, not PNG - these
+are opaque photo-style backgrounds with no need for lossless/alpha, and PNG was ~85% bigger for
+no visible quality gain).
 
 Each source sheet is a documentation image: a header, 4 side-by-side "Frame N (X.Xs)" panels,
 an "Animated Elements" thumbnail strip, and a footer. The 4 panels are NOT pixel-identical across
@@ -40,7 +42,10 @@ def build(zone, filename, y1):
     im = Image.open(os.path.join(SRC_DIR, filename)).convert('RGB')
     for i, (x0, x1) in enumerate(PANELS_X):
         crop = im.crop((x0, Y0, x1, y1)).resize((OUT_W, OUT_H), Image.LANCZOS)
-        crop.save(os.path.join(OUT_DIR, f'{zone}-f{i + 1}.png'))
+        # WebP q88 instead of PNG: ~85% smaller with no visible loss on this kind of illustrated
+        # art (verified by eye, including small sign-text legibility) - these are opaque photo-
+        # style backgrounds with no need for lossless/alpha, so PNG was all cost, no benefit.
+        crop.save(os.path.join(OUT_DIR, f'{zone}-f{i + 1}.webp'), 'WEBP', quality=88, method=6)
     print(f'{zone}: OK ({filename}, y0={Y0} y1={y1})')
 
 
