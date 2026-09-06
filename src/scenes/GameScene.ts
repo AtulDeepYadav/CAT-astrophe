@@ -47,6 +47,16 @@ import { LeaderboardSystem } from '../systems/LeaderboardSystem';
 import { DailyChallengeSystem } from '../systems/DailyChallengeSystem';
 import { SettingsSystem } from '../systems/SettingsSystem';
 import { OnboardingSystem } from '../systems/OnboardingSystem';
+import { CurrencySystem, fishEarnedForScore } from '../systems/CurrencySystem';
+import { ensureAmbientMusic } from '../systems/MusicSystem';
+import { REVIVE_COST_FISH } from '../config/gameConfig';
+import {
+  openFacebookShare,
+  openTwitterShare,
+  openWhatsAppShare,
+  shareViaWebShare,
+} from '../systems/socialShare';
+import type { ShareContent } from '../systems/socialShare';
 
 /** Minimum time between drops, so spam-tapping can't stack cats on top of each other instantly. */
 const DROP_COOLDOWN_MS = 350;
@@ -159,6 +169,11 @@ export class GameScene extends Phaser.Scene {
   private finalCatPortrait!: Phaser.GameObjects.Image;
   private finalCatGlow!: Phaser.GameObjects.Image;
   private newBestBanner!: Phaser.GameObjects.Text;
+  private reviveOfferContainer!: Phaser.GameObjects.Container;
+  private reviveCostText!: Phaser.GameObjects.Text;
+  private reviveContinueButton!: Phaser.GameObjects.Text;
+  // One revive offer per run, spent or declined — see triggerGameOver/showReviveOffer.
+  private hasUsedRevive = false;
   private purrBarFill!: Phaser.GameObjects.Rectangle;
   private purrBarY = 0;
   private purrBarLeft = 0;
@@ -192,6 +207,7 @@ export class GameScene extends Phaser.Scene {
   // restart mid-session (or the calendar day rolling over) doesn't read stale state.
   private leaderboard!: LeaderboardSystem;
   private dailyChallenge!: DailyChallengeSystem;
+  private currency!: CurrencySystem;
 
   constructor() {
     super('Game');
@@ -225,7 +241,10 @@ export class GameScene extends Phaser.Scene {
     this.settings = new SettingsSystem();
     this.leaderboard = new LeaderboardSystem();
     this.dailyChallenge = new DailyChallengeSystem();
+    this.currency = new CurrencySystem();
+    this.hasUsedRevive = false;
     this.audio.setMuted(this.settings.muted);
+    ensureAmbientMusic(this);
     this.score.reset();
     // Fresh instances each run (restart() reuses this Scene object rather than reconstructing it,
     // so these need a hard reset the way `score` gets via .reset() — ScoreSystem keeps `best`
@@ -342,6 +361,7 @@ export class GameScene extends Phaser.Scene {
     this.updateDropPreviewPosition(this.dropPreviewX);
 
     this.gameOverContainer = this.buildGameOverOverlay();
+    this.reviveOfferContainer = this.buildReviveOfferOverlay();
     this.collectionBookContainer = this.buildCollectionBookOverlay();
     this.pauseContainer = this.buildPauseOverlay();
     this.onboarding = new OnboardingSystem();
@@ -960,6 +980,8 @@ export class GameScene extends Phaser.Scene {
       this.closePause(true);
     } else if (this.collectionBookContainer?.visible) {
       this.closeCollectionBook(true);
+    } else if (this.reviveOfferContainer?.visible) {
+      this.declineRevive(true);
     }
     this.modalHistoryDepth = 0;
   };
@@ -1854,6 +1876,80 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /** The "spend Fish to keep going" prompt — deliberately much lighter-weight than the full Game
+   * Over overlay (no portrait, no glow) since it's meant to read as a quick fork in the road, not
+   * a destination screen in its own right. */
+  private buildReviveOfferOverlay(): Phaser.GameObjects.Container {
+    const centerX = GAME_WIDTH / 2;
+    const centerY = GAME_HEIGHT / 2;
+    const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.7).setOrigin(0, 0);
+
+    const title = this.add
+      .text(centerX, centerY - 90, '😿 Oh no!', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '28px',
+        fontStyle: '800',
+        color: '#ffffff',
+      })
+      .setOrigin(0.5);
+
+    this.reviveCostText = this.add
+      .text(centerX, centerY - 40, '', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '16px',
+        color: '#f7ecd9',
+        align: 'center',
+        wordWrap: { width: GAME_WIDTH - 80 },
+      })
+      .setOrigin(0.5);
+
+    this.reviveContinueButton = this.add
+      .text(centerX, centerY + 30, '▶  Continue', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '19px',
+        fontStyle: '700',
+        color: '#3a2b22',
+        backgroundColor: '#ffd873',
+        padding: { x: 26, y: 12 },
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    this.reviveContinueButton.on(
+      'pointerdown',
+      (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
+        event.stopPropagation();
+        this.acceptRevive();
+      },
+    );
+
+    const declineButton = this.add
+      .text(centerX, centerY + 90, 'End run', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '15px',
+        color: '#c9bba3',
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    declineButton.on(
+      'pointerdown',
+      (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
+        event.stopPropagation();
+        this.declineRevive();
+      },
+    );
+
+    const container = this.add.container(0, 0, [
+      overlayBg,
+      title,
+      this.reviveCostText,
+      this.reviveContinueButton,
+      declineButton,
+    ]);
+    container.setDepth(1000);
+    container.setVisible(false);
+    return container;
+  }
+
   private buildGameOverOverlay(): Phaser.GameObjects.Container {
     const centerX = GAME_WIDTH / 2;
     const centerY = GAME_HEIGHT / 2;
@@ -1933,6 +2029,31 @@ export class GameScene extends Phaser.Scene {
       this.shareScore();
     });
 
+    // Explicit platform buttons alongside the OS share sheet above — that sheet doesn't exist at
+    // all on desktop browsers, and even on mobile some players would rather tap directly than
+    // hunt through a sheet for the one app they actually want.
+    const socialRow = this.add.container(centerX, centerY + 292);
+    const socialButtons: { emoji: string; onTap: () => void }[] = [
+      { emoji: '💬', onTap: () => openWhatsAppShare(this.shareContent()) },
+      { emoji: '🐦', onTap: () => openTwitterShare(this.shareContent()) },
+      { emoji: '📘', onTap: () => openFacebookShare(this.shareContent()) },
+    ];
+    socialButtons.forEach((btn, i) => {
+      const x = (i - (socialButtons.length - 1) / 2) * 52;
+      const icon = this.add
+        .text(x, 0, btn.emoji, { fontSize: '22px', backgroundColor: '#3a2b22', padding: { x: 10, y: 6 } })
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true });
+      icon.on(
+        'pointerdown',
+        (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
+          event.stopPropagation();
+          btn.onTap();
+        },
+      );
+      socialRow.add(icon);
+    });
+
     const container = this.add.container(0, 0, [
       overlayBg,
       title,
@@ -1942,10 +2063,22 @@ export class GameScene extends Phaser.Scene {
       this.finalScoreText,
       restartHint,
       shareButton,
+      socialRow,
     ]);
     container.setDepth(1000);
     container.setVisible(false);
     return container;
+  }
+
+  /** Same text+link every share path (Web Share, WhatsApp, X, Facebook) reads from — one place so
+   * the wording can't drift between them. */
+  private shareContent(): ShareContent {
+    const bestCat = getCatData(this.highestLevelThisRun);
+    return {
+      title: 'Cat-astrophe',
+      text: `I reached ${bestCat.name} with a score of ${this.score.score} in Cat-astrophe! 🐱 Can you beat me?`,
+      url: window.location.href,
+    };
   }
 
   /**
@@ -1956,36 +2089,13 @@ export class GameScene extends Phaser.Scene {
    * closed it.
    */
   private shareScore() {
-    const bestCat = getCatData(this.highestLevelThisRun);
-    const text = `I reached ${bestCat.name} with a score of ${this.score.score} in Cat-astrophe! 🐱 Can you beat me?`;
-    const url = window.location.href;
+    const content = this.shareContent();
 
     const send = async (files?: File[]) => {
-      const nav = navigator as Navigator & {
-        share?: (data: ShareData) => Promise<void>;
-        canShare?: (data: ShareData) => boolean;
-      };
-      const shareData: ShareData = { title: 'Cat-astrophe', text, url };
-      if (files && nav.canShare?.({ files })) {
-        shareData.files = files;
-      }
-
-      if (nav.share) {
-        try {
-          await nav.share(shareData);
-          return;
-        } catch (err) {
-          if ((err as DOMException)?.name === 'AbortError') {
-            return;
-          }
-          // Fall through to the clipboard fallback below.
-        }
-      }
-
-      try {
-        await navigator.clipboard.writeText(`${text} ${url}`);
+      const result = await shareViaWebShare(content, files);
+      if (result === 'copied') {
         this.showToast('Copied to clipboard!');
-      } catch {
+      } else if (result === 'failed') {
         this.showToast('Could not share right now.');
       }
     };
@@ -2011,7 +2121,7 @@ export class GameScene extends Phaser.Scene {
   /** Small transient message over the game-over overlay — used by the share-fallback paths. */
   private showToast(message: string) {
     const toast = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 300, message, {
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 335, message, {
         fontFamily: FONT_FAMILY,
         fontSize: '14px',
         color: '#f7ecd9',
@@ -2034,8 +2144,77 @@ export class GameScene extends Phaser.Scene {
     this.isGameOver = true;
     this.tweens.killTweensOf(this.dangerWarningText); // stop the heartbeat pulse if it was mid-danger
 
+    // Zen Mode never reaches here (no fail state), and only one revive per run — decline it once
+    // and the run really is over, no second chance to reconsider once you're back at this point.
+    if (this.mode !== 'zen' && !this.hasUsedRevive && this.currency.balance >= REVIVE_COST_FISH) {
+      this.showReviveOffer();
+      return;
+    }
+    this.finalizeGameOver();
+  }
+
+  /** A brief "spend Fish to keep going" prompt shown before the real Game Over screen, the one
+   * time per run it's offered and affordable. Declining (or the board somehow tapping through)
+   * falls straight into the normal finalizeGameOver flow — this container never blocks that. */
+  private showReviveOffer() {
+    this.reviveCostText.setText(`You have 🐟 ${this.currency.balance} — Continue for 🐟 ${REVIVE_COST_FISH}?`);
+    this.reviveOfferContainer.setVisible(true);
+    this.pushModalHistoryEntry();
+  }
+
+  /** Spends the Fish, clears the cats crowding the danger line so there's actually room to keep
+   * playing, and resumes the run in place — same board, same score, just breathing room back. */
+  private acceptRevive() {
+    if (!this.currency.spend(REVIVE_COST_FISH)) {
+      return; // balance changed out from under us somehow — just fall through to Game Over below
+    }
+    this.hasUsedRevive = true;
+    this.reviveOfferContainer.setVisible(false);
+    this.consumeModalHistoryEntry();
+    this.isGameOver = false;
+
+    // Clear a bit below the line too (not just strictly-above it) so the player gets real room to
+    // work with, not just barely enough to immediately re-trigger danger on the very next rest.
+    const clearThreshold = this.dangerLineY + 70;
+    for (const body of this.matter.world.getAllBodies()) {
+      const cat = body.gameObject;
+      if (!(cat instanceof Cat) || cat.y - cat.radius >= clearThreshold) {
+        continue;
+      }
+      this.tweens.add({
+        targets: cat,
+        alpha: 0,
+        scale: 0,
+        duration: 220,
+        ease: 'Cubic.easeIn',
+        onComplete: () => cat.destroy(),
+      });
+    }
+
+    this.dangerLine.reset();
+    this.resetDangerVisuals();
+    this.hasPlayedDangerWarning = false;
+    this.hasShakenThisDanger = false;
+  }
+
+  private declineRevive(fromBackButton = false) {
+    this.reviveOfferContainer.setVisible(false);
+    if (!fromBackButton) {
+      this.consumeModalHistoryEntry();
+    }
+    this.finalizeGameOver();
+  }
+
+  private finalizeGameOver() {
     const bestCat = getCatData(this.highestLevelThisRun);
-    const summary = `You reached ${bestCat.name}!\nScore: ${this.score.score}\nBest: ${this.score.best}`;
+    const fishEarned = fishEarnedForScore(this.score.score);
+    if (fishEarned > 0) {
+      this.currency.add(fishEarned);
+    }
+    const summary =
+      fishEarned > 0
+        ? `You reached ${bestCat.name}!\nScore: ${this.score.score}\nBest: ${this.score.best}\n+${fishEarned} 🐟 earned`
+        : `You reached ${bestCat.name}!\nScore: ${this.score.score}\nBest: ${this.score.best}`;
 
     // ScoreSystem.add() already rolled `best` up to match `score` mid-run if this run set a new
     // one — by now the two being equal (and non-zero) IS the "new best" signal, no separate flag

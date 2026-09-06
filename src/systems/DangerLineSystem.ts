@@ -67,4 +67,13 @@ export class DangerLineSystem {
       this.options.onSafe(duration);
     }
   }
+
+  /** Resumes danger checking after a revive — update() no-ops forever once gameOverFired is set,
+   * since without this the very next frame's still-above-the-line board would instantly re-fire
+   * onGameOver before the player gets a single drop back. */
+  reset() {
+    this.gameOverFired = false;
+    this.inDanger = false;
+    this.dangerElapsedMs = 0;
+  }
 }

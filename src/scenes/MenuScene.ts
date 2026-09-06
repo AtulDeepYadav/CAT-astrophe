@@ -5,11 +5,15 @@ import { backgroundFrameTextureKey } from '../config/worldZones';
 import { todaysModifier } from '../config/dailyChallenges';
 import { ScoreSystem } from '../systems/ScoreSystem';
 import { LeaderboardSystem } from '../systems/LeaderboardSystem';
+import type { LeaderboardEntry } from '../systems/LeaderboardSystem';
 import { DailyChallengeSystem } from '../systems/DailyChallengeSystem';
 import { SettingsSystem } from '../systems/SettingsSystem';
 import { CollectionSystem } from '../systems/CollectionSystem';
+import { CurrencySystem } from '../systems/CurrencySystem';
 import { exportSaveData, importSaveData } from '../systems/saveBackup';
 import { getCatData, portraitTextureKeyForLevel } from '../config/catData';
+import { shareViaWebShare } from '../systems/socialShare';
+import { ensureAmbientMusic } from '../systems/MusicSystem';
 
 /**
  * Title screen — the game used to boot straight into a live round with no beat before the
@@ -35,6 +39,7 @@ export class MenuScene extends Phaser.Scene {
   create() {
     const score = new ScoreSystem();
     const daily = new DailyChallengeSystem();
+    const currency = new CurrencySystem();
     const modifier = todaysModifier();
 
     this.modalHistoryDepth = 0;
@@ -46,6 +51,8 @@ export class MenuScene extends Phaser.Scene {
 
     this.add.image(0, 0, backgroundFrameTextureKey('home', 1)).setOrigin(0, 0);
     this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1008, 0.45).setOrigin(0, 0);
+
+    ensureAmbientMusic(this);
 
     // Mute toggle, top-right — so a player can silence the game before ever tapping Play, not
     // only from inside a run's pause menu.
@@ -75,7 +82,7 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.add
-      .text(GAME_WIDTH / 2, 160, `Best score: ${score.best}`, {
+      .text(GAME_WIDTH / 2, 160, `Best score: ${score.best}   🐟 ${currency.balance}`, {
         fontFamily: FONT_FAMILY,
         fontSize: '16px',
         color: '#fff6e8',
@@ -336,6 +343,17 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     const entries = new LeaderboardSystem().getTop();
+
+    // Top-right of the panel, next to the title, rather than in the row list below — that list's
+    // length varies with how many runs exist, but this button's position shouldn't move around
+    // depending on it. Shares the player's own #1 run as a brag, same shape as GameScene's own
+    // Share Score — there's no real global leaderboard to share *to* yet (see the local-only note
+    // in LeaderboardSystem), just this player's own best.
+    const shareButton = this.add
+      .text(GAME_WIDTH / 2 + 145, GAME_HEIGHT / 2 - 205, '📤', { fontSize: '20px' })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    shareButton.on('pointerdown', () => this.shareLeaderboardBest(entries));
     const rows: Phaser.GameObjects.Text[] = [];
     if (entries.length === 0) {
       rows.push(
@@ -376,9 +394,33 @@ export class MenuScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     closeButton.on('pointerdown', () => this.toggleLeaderboard(false));
 
-    const container = this.add.container(0, 0, [bg, panel, title, ...rows, closeButton]);
+    const container = this.add.container(0, 0, [bg, panel, title, shareButton, ...rows, closeButton]);
     container.setDepth(1000);
     container.setVisible(false);
     return container;
+  }
+
+  /** Shares the player's own #1 local run as a brag — see the doc comment on the leaderboard's
+   * share button for why this is "your best," not the leaderboard itself. Web Share API's native
+   * sheet already lists WhatsApp/X/Facebook/etc. on a real phone, so unlike Game Over's dedicated
+   * per-platform icon row (there's real spare room there), this stays a single button here where
+   * the panel is already tight on vertical space. */
+  private async shareLeaderboardBest(entries: LeaderboardEntry[]) {
+    if (entries.length === 0) {
+      this.showToast('Play a round first — nothing to share yet!');
+      return;
+    }
+    const best = entries[0];
+    const modeTag = best.mode === 'daily' ? ' (Daily Challenge)' : '';
+    const result = await shareViaWebShare({
+      title: 'Cat-astrophe',
+      text: `My top run in Cat-astrophe: ${best.score} points as a ${best.catName}${modeTag}! 🐱 Can you beat me?`,
+      url: window.location.href,
+    });
+    if (result === 'copied') {
+      this.showToast('Copied to clipboard!');
+    } else if (result === 'failed') {
+      this.showToast('Could not share right now.');
+    }
   }
 }

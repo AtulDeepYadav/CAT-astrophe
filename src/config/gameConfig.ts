@@ -40,6 +40,12 @@ export const DANGER_LINE_Y = CONTAINER_TOP + 30;
  * (see dailyChallenges.ts) on top of otherwise-normal rules. */
 export type GameMode = 'normal' | 'zen' | 'daily';
 
+/** Fish cost of the one revive offer per run — see CurrencySystem and GameScene's
+ * showReviveOffer. Roughly a run and a half of Fish at the low end of fishEarnedForScore, so a
+ * new player's first couple of runs build toward being able to afford one, rather than it being
+ * free (which would just move the "real" game over one bad run later) or unaffordably expensive. */
+export const REVIVE_COST_FISH = 30;
+
 export const MATTER_CONFIG = {
   gravity: { x: 0, y: 1 },
   debug: false,

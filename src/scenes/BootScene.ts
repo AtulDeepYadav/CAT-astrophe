@@ -11,6 +11,7 @@ import {
 } from '../config/catData';
 import { BG_FRAME_COUNT, WORLD_ZONES, backgroundFrameTextureKey } from '../config/worldZones';
 import { animFrameTextureKey, framesForLevel } from '../config/catAnimations';
+import { AMBIENT_MUSIC_KEY } from '../systems/MusicSystem';
 
 const GLOW_TEXTURE_SIZE = 160;
 
@@ -69,6 +70,11 @@ export class BootScene extends Phaser.Scene {
         );
       }
     }
+
+    // See MusicSystem — a synthesized, seamlessly-looping ambient pad (no real composer track
+    // exists to source, and there's no ffmpeg in this environment to compress one), loaded once
+    // here and reused for the whole game session regardless of which scene is active.
+    this.load.audio(AMBIENT_MUSIC_KEY, 'assets/audio/music/ambient-loop.wav');
   }
 
   async create() {
