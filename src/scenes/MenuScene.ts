@@ -7,6 +7,7 @@ import { ScoreSystem } from '../systems/ScoreSystem';
 import { LeaderboardSystem } from '../systems/LeaderboardSystem';
 import { DailyChallengeSystem } from '../systems/DailyChallengeSystem';
 import { SettingsSystem } from '../systems/SettingsSystem';
+import { exportSaveData, importSaveData } from '../systems/saveBackup';
 
 /**
  * Title screen — the game used to boot straight into a live round with no beat before the
@@ -78,6 +79,29 @@ export class MenuScene extends Phaser.Scene {
 
     this.buildMenuButton(GAME_WIDTH / 2, 490, '🏆  Leaderboard', '#ffe6a7', () => this.toggleLeaderboard(true));
 
+    // Secondary maintenance actions, deliberately low-key (plain text, no button chrome) so they
+    // don't compete with Play/Daily/Zen/Leaderboard — this is a stopgap for real cloud save
+    // (needs the native wrapping this project hasn't done yet), not a headline feature.
+    const backupLink = this.add
+      .text(GAME_WIDTH / 2 - 70, GAME_HEIGHT - 70, '💾 Backup', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '13px',
+        color: '#f2e6d3',
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    backupLink.on('pointerdown', () => this.backupProgress());
+
+    const restoreLink = this.add
+      .text(GAME_WIDTH / 2 + 70, GAME_HEIGHT - 70, '📥 Restore', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '13px',
+        color: '#f2e6d3',
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    restoreLink.on('pointerdown', () => this.restoreProgress());
+
     this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT - 40, 'Drop cats. Merge cats. Try not to cat-astrophe.', {
         fontFamily: FONT_FAMILY,
@@ -87,6 +111,61 @@ export class MenuScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.leaderboardContainer = this.buildLeaderboardOverlay();
+  }
+
+  /** Copies a portable backup code to the clipboard — see saveBackup.ts for why this exists
+   * instead of a real cloud save. */
+  private async backupProgress() {
+    const code = exportSaveData();
+    if (!code) {
+      this.showToast('Nothing to back up yet — play a round first!');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(code);
+      this.showToast('Copied! Paste it somewhere safe.');
+    } catch {
+      this.showToast('Could not copy — try again.');
+    }
+  }
+
+  /** window.prompt/alert rather than a custom Phaser text-input UI — Phaser has no native text
+   * field, and these work everywhere without building one just for this stopgap feature. */
+  private restoreProgress() {
+    const code = window.prompt('Paste your backup code:');
+    if (!code) {
+      return;
+    }
+    if (importSaveData(code)) {
+      window.alert('Restored! Reloading…');
+      window.location.reload();
+    } else {
+      this.showToast("That code didn't look right.");
+    }
+  }
+
+  private showToast(message: string) {
+    const toast = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT - 100, message, {
+        fontFamily: FONT_FAMILY,
+        fontSize: '13px',
+        color: '#fff6e8',
+        backgroundColor: '#3a2b22',
+        padding: { x: 12, y: 6 },
+        align: 'center',
+        wordWrap: { width: GAME_WIDTH - 60 },
+      })
+      .setOrigin(0.5)
+      .setAlpha(0);
+
+    this.tweens.add({
+      targets: toast,
+      alpha: 1,
+      duration: 200,
+      onComplete: () => {
+        this.tweens.add({ targets: toast, alpha: 0, duration: 400, delay: 1600, onComplete: () => toast.destroy() });
+      },
+    });
   }
 
   private startGame(mode: GameMode) {
