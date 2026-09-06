@@ -490,8 +490,19 @@ export class GameScene extends Phaser.Scene {
       br: 0,
     });
 
-    // Arena fill removed entirely (was a translucent wash) — the world background now shows
-    // straight through the play area, with only the gold border below marking its edges.
+    // A light, low-alpha wash over the arena only (not the score bar, which is already opaque) —
+    // the new hand-illustrated zone backgrounds are far busier/more detailed than the flat art
+    // this panel was designed against, and cats were getting lost against them. A cream wash
+    // (not a dark one) was chosen deliberately: every cat has a crisp black ink outline, which
+    // reads clearly against a lightened backdrop regardless of the cat's own fur color, whereas a
+    // dark wash only helped light-colored cats and made dark ones (Tabby, Lynx) blend in more.
+    // Sits behind cats (depth -50, between the background's -100 and everything else's default 0)
+    // but in front of the background image, softening it without hiding the scenery entirely.
+    this.add
+      .rectangle(PANEL_LEFT, CONTAINER_TOP, width, PANEL_BOTTOM - CONTAINER_TOP, 0xfff6e8, 0.38)
+      .setOrigin(0, 0)
+      .setDepth(-50);
+
     graphics.lineStyle(4, 0xb8860b, 1);
     graphics.strokeRoundedRect(PANEL_LEFT, PANEL_TOP, width, PANEL_BOTTOM - PANEL_TOP, radius);
     graphics.lineBetween(PANEL_LEFT, PANEL_DIVIDER_Y, PANEL_RIGHT, PANEL_DIVIDER_Y);
