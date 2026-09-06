@@ -1537,10 +1537,119 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    const container = this.add.container(0, 0, [overlayBg, title, this.finalCatPortrait, this.finalScoreText, restartHint]);
+    const shareButton = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 160, '🐾 Share Score', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '17px',
+        fontStyle: '700',
+        color: '#3a2b22',
+        backgroundColor: '#ffd873',
+        padding: { x: 18, y: 9 },
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+
+    // Own pointerdown handler with stopPropagation — otherwise this tap would also satisfy the
+    // scene-wide `input.once('pointerdown')` restart listener set up in triggerGameOver(),
+    // instantly restarting the run out from under the share sheet.
+    shareButton.on('pointerdown', (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
+      event.stopPropagation();
+      this.shareScore();
+    });
+
+    const container = this.add.container(0, 0, [
+      overlayBg,
+      title,
+      this.finalCatPortrait,
+      this.finalScoreText,
+      restartHint,
+      shareButton,
+    ]);
     container.setDepth(1000);
     container.setVisible(false);
     return container;
+  }
+
+  /**
+   * Shares the run via the Web Share API (native Android/iOS share sheet) with a screenshot of
+   * the final board attached where the platform supports sharing files, falling back to a
+   * text+link share, and finally to a clipboard copy on platforms with no Web Share API at all
+   * (desktop browsers). A cancelled share sheet (AbortError) is not an error — the player just
+   * closed it.
+   */
+  private shareScore() {
+    const bestCat = getCatData(this.highestLevelThisRun);
+    const text = `I reached ${bestCat.name} with a score of ${this.score.score} in Cat-astrophe! 🐱 Can you beat me?`;
+    const url = window.location.href;
+
+    const send = async (files?: File[]) => {
+      const nav = navigator as Navigator & {
+        share?: (data: ShareData) => Promise<void>;
+        canShare?: (data: ShareData) => boolean;
+      };
+      const shareData: ShareData = { title: 'Cat-astrophe', text, url };
+      if (files && nav.canShare?.({ files })) {
+        shareData.files = files;
+      }
+
+      if (nav.share) {
+        try {
+          await nav.share(shareData);
+          return;
+        } catch (err) {
+          if ((err as DOMException)?.name === 'AbortError') {
+            return;
+          }
+          // Fall through to the clipboard fallback below.
+        }
+      }
+
+      try {
+        await navigator.clipboard.writeText(`${text} ${url}`);
+        this.showToast('Copied to clipboard!');
+      } catch {
+        this.showToast('Could not share right now.');
+      }
+    };
+
+    try {
+      this.game.renderer.snapshot(async (snapshot) => {
+        if (!(snapshot instanceof HTMLImageElement)) {
+          void send();
+          return;
+        }
+        try {
+          const blob = await (await fetch(snapshot.src)).blob();
+          void send([new File([blob], 'cat-astrophe-score.png', { type: 'image/png' })]);
+        } catch {
+          void send();
+        }
+      });
+    } catch {
+      void send();
+    }
+  }
+
+  /** Small transient message over the game-over overlay — used by the share-fallback paths. */
+  private showToast(message: string) {
+    const toast = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 210, message, {
+        fontFamily: FONT_FAMILY,
+        fontSize: '14px',
+        color: '#f7ecd9',
+      })
+      .setOrigin(0.5)
+      .setDepth(1001)
+      .setAlpha(0);
+
+    this.tweens.add({
+      targets: toast,
+      alpha: 1,
+      duration: 200,
+      onComplete: () => {
+        this.tweens.add({ targets: toast, alpha: 0, duration: 400, delay: 1400, onComplete: () => toast.destroy() });
+      },
+    });
   }
 
   private triggerGameOver() {
