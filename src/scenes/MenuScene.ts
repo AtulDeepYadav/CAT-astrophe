@@ -83,6 +83,9 @@ export class MenuScene extends Phaser.Scene {
         this.muteIcon.setIcon(nextMuted ? 'speakerOff' : 'speakerOn');
       },
     });
+    // createIconButton/createButton deliberately don't add their own container to the scene (see
+    // uiKit's doc comment) — every top-level use here has to do it itself, exactly once.
+    this.add.existing(this.muteIcon.container);
 
     this.add
       .text(GAME_WIDTH / 2, 108, '🐱 Cat-astrophe', {
@@ -110,36 +113,44 @@ export class MenuScene extends Phaser.Scene {
       );
     }
 
-    createButton(this, GAME_WIDTH / 2, 280, '▶  Play', THEME.primary, {
-      fontSize: 21,
-      minWidth: 220,
-      depth: 10,
-      onTap: () => this.onMenuButtonTap(() => this.startGame('normal')),
-    });
+    this.add.existing(
+      createButton(this, GAME_WIDTH / 2, 280, '▶  Play', THEME.primary, {
+        fontSize: 21,
+        minWidth: 220,
+        depth: 10,
+        onTap: () => this.onMenuButtonTap(() => this.startGame('normal')),
+      }).container,
+    );
 
     const dailyLabel = daily.playedToday
       ? `📅 Daily: ${modifier.name}  (best ${daily.bestScoreToday})`
       : `📅 Daily: ${modifier.name}`;
-    createButton(this, GAME_WIDTH / 2, 350, dailyLabel, THEME.info, {
-      fontSize: 15,
-      minWidth: 220,
-      depth: 10,
-      onTap: () => this.onMenuButtonTap(() => this.startGame('daily')),
-    });
+    this.add.existing(
+      createButton(this, GAME_WIDTH / 2, 350, dailyLabel, THEME.info, {
+        fontSize: 15,
+        minWidth: 220,
+        depth: 10,
+        onTap: () => this.onMenuButtonTap(() => this.startGame('daily')),
+      }).container,
+    );
 
-    createButton(this, GAME_WIDTH / 2, 420, '🌙  Zen Mode', THEME.calm, {
-      fontSize: 19,
-      minWidth: 220,
-      depth: 10,
-      onTap: () => this.onMenuButtonTap(() => this.startGame('zen')),
-    });
+    this.add.existing(
+      createButton(this, GAME_WIDTH / 2, 420, '🌙  Zen Mode', THEME.calm, {
+        fontSize: 19,
+        minWidth: 220,
+        depth: 10,
+        onTap: () => this.onMenuButtonTap(() => this.startGame('zen')),
+      }).container,
+    );
 
-    createButton(this, GAME_WIDTH / 2, 490, '🏆  Leaderboard', THEME.gold, {
-      fontSize: 19,
-      minWidth: 220,
-      depth: 10,
-      onTap: () => this.onMenuButtonTap(() => this.toggleLeaderboard(true)),
-    });
+    this.add.existing(
+      createButton(this, GAME_WIDTH / 2, 490, '🏆  Leaderboard', THEME.gold, {
+        fontSize: 19,
+        minWidth: 220,
+        depth: 10,
+        onTap: () => this.onMenuButtonTap(() => this.toggleLeaderboard(true)),
+      }).container,
+    );
 
     this.buildHeroShowcase();
 

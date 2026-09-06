@@ -110,14 +110,29 @@ export function createButton(
   const bg = scene.add.graphics();
   drawButtonFace(bg, w, h, radius, theme);
 
-  const container = scene.add.container(x, y, [shadow, bg, text]);
+  // Not auto-added via scene.add.container() — every overlay in this app builds a button via
+  // createButton() and then places the returned container as a child of its *own* outer container
+  // (`this.add.container(0, 0, [..., button.container])`); callers are responsible for parenting
+  // it exactly once (top-level call sites must call `scene.add.existing(container)` themselves).
+  const container = new Phaser.GameObjects.Container(scene, x, y, [shadow, bg, text]);
   container.setSize(w, h);
-  // An explicit, centered Rectangle hitArea — Container's *default* hit area (from setSize()
-  // alone, with no explicit hitArea) is anchored to the container's top-left corner, which
-  // doesn't match this button's children (drawn centered, spanning -w/2..w/2/-h/2..h/2), so a
-  // default-sized hitArea would silently sit half a button-width off from the visible button.
+  // Rectangle(0, 0, w, h) — NOT a centered (-w/2, -h/2, w, h) rect, even though the button's
+  // children are drawn centered on (0,0). Phaser's InputManager.pointWithinHitArea() *always*
+  // adds the Container's displayOriginX/Y (= width/2, height/2 for a Container — see Container.js)
+  // to the pointer's local coordinate before testing it against hitArea, for every Container
+  // regardless of what hitArea it was given. A hitArea already centered on (0,0) then gets that
+  // same half-width/half-height added again, shifting the *actual* clickable region a full half a
+  // button-width up-and-left of the visible button — e.g. only its left half was clickable, with
+  // the right half dead and a phantom clickable strip extending into the empty space beyond the
+  // button's left edge. (0, 0, w, h) is the offset this addition is designed for — it's also
+  // exactly what Container.setSize() alone would generate as the *default* hit area with no
+  // explicit hitArea at all. Confirmed by reading InputManager.js's pointWithinHitArea and by a
+  // live real-click test that landed 0.47px outside the old rect's boundary, matching the math
+  // exactly. This one-line rectangle origin was the entire cause of "only the text is clickable" —
+  // the label sits at local (0,0), the one point the old, wrongly-shifted rect's corner still
+  // covered.
   container.setInteractive({
-    hitArea: new Phaser.Geom.Rectangle(-w / 2, -h / 2, w, h),
+    hitArea: new Phaser.Geom.Rectangle(0, 0, w, h),
     hitAreaCallback: Phaser.Geom.Rectangle.Contains,
     useHandCursor: true,
   });
@@ -129,7 +144,7 @@ export function createButton(
 
   if (options.onTap) {
     container.on(
-      'pointerup',
+      'pointerdown',
       (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
         event.stopPropagation();
         options.onTap!();
@@ -147,13 +162,9 @@ export function createButton(
       shadow.fillStyle(0x1a0f06, 0.25);
       shadow.fillRoundedRect(-newW / 2, -h / 2 + 5, newW, h, radius);
       container.setSize(newW, h);
-      // Directly update the existing centered Rectangle hitArea's bounds — removeInteractive()
-      // + setInteractive() with no explicit hitArea would regenerate Phaser's *default*
-      // size-based one instead, which is NOT centered on this button's children (see the
-      // constructor's setInteractive() call above) and would silently make the button
-      // unclickable the moment its label first changes width (confirmed live: the Pause
-      // overlay's Sound On/Off toggle stopped responding to real clicks after the first tap).
-      (container.input!.hitArea as Phaser.Geom.Rectangle).setTo(-newW / 2, -h / 2, newW, h);
+      // Keep the hitArea in the same (0, 0, w, h) space as the constructor's — see the
+      // setInteractive() call above for why that's the correct rect, not a centered one.
+      (container.input!.hitArea as Phaser.Geom.Rectangle).setTo(0, 0, newW, h);
     }
   };
 
@@ -280,12 +291,15 @@ export function createIconButton(
   const iconGfx = scene.add.graphics();
   drawIcon(iconGfx, icon, radius, dark ? '#fff6e8' : '#3a2b22');
 
-  const container = scene.add.container(x, y, [shadow, bg, iconGfx]);
+  // Not auto-added to the scene — see createButton's doc comment on parenting responsibility.
+  const container = new Phaser.GameObjects.Container(scene, x, y, [shadow, bg, iconGfx]);
   container.setSize(radius * 2, radius * 2);
-  // A centered Rectangle hitArea (same reasoning as createButton) — a square touch target for a
-  // round icon is a normal, common trade-off, and simpler/more reliable than a Circle hitArea.
+  // (0, 0, size, size), not a centered rect — see createButton's setInteractive() comment for why
+  // a Container hitArea must be given in this un-shifted space (Phaser always adds
+  // displayOriginX/Y = width/2, height/2 on top of it during hit testing). A square touch target
+  // for a round icon is otherwise a normal, common trade-off over a Circle hitArea.
   container.setInteractive({
-    hitArea: new Phaser.Geom.Rectangle(-radius, -radius, radius * 2, radius * 2),
+    hitArea: new Phaser.Geom.Rectangle(0, 0, radius * 2, radius * 2),
     hitAreaCallback: Phaser.Geom.Rectangle.Contains,
     useHandCursor: true,
   });
@@ -296,7 +310,7 @@ export function createIconButton(
 
   if (options.onTap) {
     container.on(
-      'pointerup',
+      'pointerdown',
       (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
         event.stopPropagation();
         options.onTap!();
