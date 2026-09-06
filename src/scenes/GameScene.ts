@@ -546,6 +546,12 @@ export class GameScene extends Phaser.Scene {
     this.dangerLine.update(delta, this.matter.world);
     this.combo.update(delta);
     this.idleSystem.update(delta, this.matter.world);
+
+    const wasPurrReady = this.purrMeter.isReady;
+    this.purrMeter.update(delta);
+    if (wasPurrReady && !this.purrMeter.isReady) {
+      this.refreshPurrBar(); // meter decayed back to empty unspent — drop the pulsing "ready" look
+    }
   }
 
   /** Picks a level via the weighted spawn table plus an independent Golden Cat roll. */
@@ -1007,7 +1013,39 @@ export class GameScene extends Phaser.Scene {
     const { portraitTextureKey, portraitEmoji, eyebrow, title, accentColor, holdMs = 1300 } = opts;
     const accentHex = `#${accentColor.toString(16).padStart(6, '0')}`;
     const width = 260;
-    const height = 58;
+    const textX = -width / 2 + 62;
+    const textMaxWidth = width - 62 - 16; // right margin so a long title wraps instead of running past the box edge
+
+    const eyebrowText = this.add
+      .text(textX, 0, eyebrow, {
+        fontFamily: FONT_FAMILY,
+        fontSize: '11px',
+        color: accentHex,
+        fontStyle: 'bold',
+      })
+      .setOrigin(0, 0.5);
+
+    // A short cat/achievement name fits on one line at the box's original size; a longer phrase
+    // (e.g. the zone-transition banner's "THE OUTSIDE WORLD AWAITS") wraps to two lines instead
+    // of overflowing past the box — measured and centered below rather than a fixed y, so the box
+    // grows to fit instead of clipping.
+    const titleText = this.add
+      .text(textX, 0, title, {
+        fontFamily: FONT_FAMILY,
+        fontSize: '19px',
+        color: '#fdf6ec',
+        fontStyle: 'bold',
+        wordWrap: { width: textMaxWidth },
+        lineSpacing: 2,
+      })
+      .setOrigin(0, 0.5);
+
+    const gap = 6;
+    const stackHeight = eyebrowText.height + gap + titleText.height;
+    const height = Math.max(58, stackHeight + 24);
+    const stackTop = -stackHeight / 2;
+    eyebrowText.setY(stackTop + eyebrowText.height / 2);
+    titleText.setY(stackTop + eyebrowText.height + gap + titleText.height / 2);
 
     const bg = this.add.rectangle(0, 0, width, height, 0x1a1410, 0.9).setStrokeStyle(2, accentColor, 1);
     const children: Phaser.GameObjects.GameObject[] = [bg];
@@ -1020,24 +1058,7 @@ export class GameScene extends Phaser.Scene {
       children.push(this.add.text(-width / 2 + 34, 0, portraitEmoji, { fontSize: '30px' }).setOrigin(0.5));
     }
 
-    children.push(
-      this.add
-        .text(-width / 2 + 62, -15, eyebrow, {
-          fontFamily: FONT_FAMILY,
-          fontSize: '11px',
-          color: accentHex,
-          fontStyle: 'bold',
-        })
-        .setOrigin(0, 0.5),
-      this.add
-        .text(-width / 2 + 62, 12, title, {
-          fontFamily: FONT_FAMILY,
-          fontSize: '19px',
-          color: '#fdf6ec',
-          fontStyle: 'bold',
-        })
-        .setOrigin(0, 0.5),
-    );
+    children.push(eyebrowText, titleText);
 
     const banner = this.add.container(GAME_WIDTH / 2, CONTAINER_TOP + 74, children);
     banner.setDepth(600);
