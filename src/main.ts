@@ -3,7 +3,12 @@ import { GAME_HEIGHT, GAME_WIDTH, MATTER_CONFIG } from './config/gameConfig';
 import { BootScene } from './scenes/BootScene';
 import { MenuScene } from './scenes/MenuScene';
 import { GameScene } from './scenes/GameScene';
+import { initCrashReporter } from './crashReporter';
 import './style.css';
+
+// Before the game boots — catches anything that goes wrong during Phaser's own startup too,
+// not just once gameplay is running. See crashReporter.ts for what this can and can't do yet.
+initCrashReporter();
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
