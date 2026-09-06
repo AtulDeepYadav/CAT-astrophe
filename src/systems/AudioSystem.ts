@@ -10,6 +10,11 @@ import { hasMergeSound, mergeSoundKey } from '../config/catData';
  */
 export class AudioSystem {
   private ctx: AudioContext | null = null;
+  /** Every synthesized oscillator routes through this one node instead of straight to
+   * ctx.destination — muting is then one gain change here instead of touching each of the 9
+   * play methods individually. */
+  private masterGain: GainNode | null = null;
+  private muted = false;
   /** Optional — lets playMergeTone play a real preloaded clip via Phaser's sound manager instead of synthesizing. */
   private scene: Phaser.Scene | null;
 
@@ -23,6 +28,16 @@ export class AudioSystem {
     if (ctx && ctx.state === 'suspended') {
       void ctx.resume();
     }
+  }
+
+  setMuted(muted: boolean) {
+    this.muted = muted;
+    if (this.masterGain) {
+      this.masterGain.gain.value = muted ? 0 : 1;
+    }
+    // The one real recorded clip path (playMergeTone's hasMergeSound branch) goes through
+    // Phaser's own sound manager, not this class's AudioContext — needs its own mute switch.
+    this.scene?.sound.setMute(muted);
   }
 
   playMergeTone(level: number) {
@@ -40,7 +55,7 @@ export class AudioSystem {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(this.masterGain!);
 
     const startFreq = Math.max(140, 720 - level * 55);
     const duration = 0.22 + level * 0.015;
@@ -67,7 +82,7 @@ export class AudioSystem {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(this.masterGain!);
 
     osc.type = 'sine';
     osc.frequency.setValueAtTime(220, now);
@@ -92,7 +107,7 @@ export class AudioSystem {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(this.masterGain!);
 
     osc.type = 'sine';
     osc.frequency.setValueAtTime(150, now);
@@ -117,7 +132,7 @@ export class AudioSystem {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(this.masterGain!);
 
     osc.type = 'square';
     osc.frequency.setValueAtTime(680, now);
@@ -143,7 +158,7 @@ export class AudioSystem {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(this.masterGain!);
 
     osc.type = 'triangle';
     osc.frequency.setValueAtTime(320, now);
@@ -169,7 +184,7 @@ export class AudioSystem {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.masterGain!);
 
       const start = now + delay;
       osc.type = 'square';
@@ -197,7 +212,7 @@ export class AudioSystem {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.masterGain!);
 
       const start = now + delay;
       osc.type = 'triangle';
@@ -229,7 +244,7 @@ export class AudioSystem {
     body.frequency.linearRampToValueAtTime(110, now + 0.25);
     body.frequency.linearRampToValueAtTime(55, now + duration);
     body.connect(bodyGain);
-    bodyGain.connect(ctx.destination);
+    bodyGain.connect(this.masterGain!);
     bodyGain.gain.setValueAtTime(0.0001, now);
     bodyGain.gain.exponentialRampToValueAtTime(0.35, now + 0.15);
     bodyGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
@@ -248,7 +263,7 @@ export class AudioSystem {
     growl.frequency.setValueAtTime(180, now);
     growl.frequency.linearRampToValueAtTime(140, now + duration);
     growl.connect(growlGain);
-    growlGain.connect(ctx.destination);
+    growlGain.connect(this.masterGain!);
     growlGain.gain.setValueAtTime(0.0001, now);
     growlGain.gain.exponentialRampToValueAtTime(0.15, now + 0.2);
     growlGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
@@ -279,7 +294,7 @@ export class AudioSystem {
       osc.type = 'sine';
       osc.frequency.setValueAtTime(freq, start);
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(this.masterGain!);
 
       gain.gain.setValueAtTime(0.0001, start);
       gain.gain.exponentialRampToValueAtTime(0.22, start + 0.03);
@@ -311,6 +326,9 @@ export class AudioSystem {
         return null;
       }
       this.ctx = new AudioContextCtor();
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.value = this.muted ? 0 : 1;
+      this.masterGain.connect(this.ctx.destination);
       return this.ctx;
     } catch {
       return null;

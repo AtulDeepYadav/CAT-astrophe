@@ -44,6 +44,7 @@ import type { DailyModifier } from '../config/dailyChallenges';
 import { todayKey, todaysModifier } from '../config/dailyChallenges';
 import { LeaderboardSystem } from '../systems/LeaderboardSystem';
 import { DailyChallengeSystem } from '../systems/DailyChallengeSystem';
+import { SettingsSystem } from '../systems/SettingsSystem';
 
 /** Minimum time between drops, so spam-tapping can't stack cats on top of each other instantly. */
 const DROP_COOLDOWN_MS = 350;
@@ -124,6 +125,16 @@ export class GameScene extends Phaser.Scene {
   private collectionButtonBounds = { x: 0, y: 0, radius: 22 };
   private cosmeticSwatchBounds: { id: string; x: number; y: number; radius: number }[] = [];
 
+  private pauseButtonBounds = { x: 0, y: 0, radius: 22 };
+  private pauseContainer!: Phaser.GameObjects.Container;
+  private muteButtonText!: Phaser.GameObjects.Text;
+  private isPaused = false;
+  // Re-read fresh in create(), not a field initializer here — a field initializer only runs once
+  // at Scene construction (game boot), but scene.start()/restart() reuse the same Scene object
+  // without re-running the constructor. Without this, a mute toggle made in MenuScene (which
+  // *does* get freshly constructed each time) would never be seen by an already-alive GameScene.
+  private settings!: SettingsSystem;
+
   private dropPreviewImage!: Phaser.GameObjects.Image;
   private dropPreviewGlow!: Phaser.GameObjects.Image;
   private aimGuide!: Phaser.GameObjects.Graphics;
@@ -167,8 +178,10 @@ export class GameScene extends Phaser.Scene {
   private mode: GameMode = 'normal';
   private modifier: DailyModifier | null = null;
   private dangerLineY = DANGER_LINE_Y;
-  private leaderboard = new LeaderboardSystem();
-  private dailyChallenge = new DailyChallengeSystem();
+  // Same reasoning as `settings` above — freshly constructed in create(), not here, so a
+  // restart mid-session (or the calendar day rolling over) doesn't read stale state.
+  private leaderboard!: LeaderboardSystem;
+  private dailyChallenge!: DailyChallengeSystem;
 
   constructor() {
     super('Game');
@@ -193,6 +206,11 @@ export class GameScene extends Phaser.Scene {
   create() {
     this.prefersReducedMotion =
       typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.isPaused = false;
+    this.settings = new SettingsSystem();
+    this.leaderboard = new LeaderboardSystem();
+    this.dailyChallenge = new DailyChallengeSystem();
+    this.audio.setMuted(this.settings.muted);
     this.score.reset();
     // Fresh instances each run (restart() reuses this Scene object rather than reconstructing it,
     // so these need a hard reset the way `score` gets via .reset() — ScoreSystem keeps `best`
@@ -310,6 +328,7 @@ export class GameScene extends Phaser.Scene {
 
     this.gameOverContainer = this.buildGameOverOverlay();
     this.collectionBookContainer = this.buildCollectionBookOverlay();
+    this.pauseContainer = this.buildPauseOverlay();
 
     registerMergeSystem(this.matter.world, {
       onMerge: ({ newLevel, x, y, isGolden }) => {
@@ -420,11 +439,17 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      if (this.isGameOver) {
+      if (this.isGameOver || this.isPaused) {
         return;
       }
 
       this.audio.unlock(); // must happen from a real user gesture; harmless to call every tap
+
+      if (this.isPointOnPauseButton(pointer.x, pointer.y)) {
+        this.openPause();
+        this.suppressNextDrop = true;
+        return;
+      }
 
       if (this.collectionBookContainer.visible) {
         const tabHit = this.hitTestCollectionTab(pointer.x, pointer.y);
@@ -463,14 +488,14 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-      if (this.isGameOver || this.suppressNextDrop || this.collectionBookContainer.visible) {
+      if (this.isGameOver || this.isPaused || this.suppressNextDrop || this.collectionBookContainer.visible) {
         return;
       }
       this.updateDropPreviewPosition(pointer.x);
     });
 
     this.input.on('pointerup', () => {
-      if (this.isGameOver || this.collectionBookContainer.visible) {
+      if (this.isGameOver || this.isPaused || this.collectionBookContainer.visible) {
         return;
       }
       if (this.suppressNextDrop) {
@@ -528,6 +553,19 @@ export class GameScene extends Phaser.Scene {
     this.add
       .text(this.collectionButtonBounds.x, this.collectionButtonBounds.y, '📖', {
         fontSize: '24px',
+        stroke: '#fdf6ec',
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5);
+
+    // Pause button — grouped with Collection Book on the "menu actions" side of the header,
+    // leaving the Big Cats stat alone on the left. Unlike the Collection Book (a quick-glance
+    // overlay that leaves the board running underneath), this one actually stops the simulation.
+    this.pauseButtonBounds = { x: GAME_WIDTH - 30 - 55, y: HEADER_TEXT_HEIGHT / 2, radius: 22 };
+    this.add
+      .text(this.pauseButtonBounds.x, this.pauseButtonBounds.y, '⏸', {
+        fontSize: '22px',
+        color: '#3a2b22',
         stroke: '#fdf6ec',
         strokeThickness: 4,
       })
@@ -670,7 +708,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number) {
-    if (this.isGameOver) {
+    if (this.isGameOver || this.isPaused) {
       return;
     }
     // Zen Mode's whole point is no fail state — skip the check entirely rather than just
@@ -819,6 +857,86 @@ export class GameScene extends Phaser.Scene {
   private isPointOnCollectionButton(x: number, y: number): boolean {
     const { x: bx, y: by, radius } = this.collectionButtonBounds;
     return Phaser.Math.Distance.Between(x, y, bx, by) <= radius;
+  }
+
+  private isPointOnPauseButton(x: number, y: number): boolean {
+    const { x: bx, y: by, radius } = this.pauseButtonBounds;
+    return Phaser.Math.Distance.Between(x, y, bx, by) <= radius;
+  }
+
+  private openPause() {
+    this.isPaused = true;
+    this.matter.world.pause();
+    this.pauseContainer.setVisible(true);
+  }
+
+  private closePause() {
+    this.isPaused = false;
+    this.matter.world.resume();
+    this.pauseContainer.setVisible(false);
+  }
+
+  private toggleMute() {
+    const nextMuted = !this.settings.muted;
+    this.settings.setMuted(nextMuted);
+    this.audio.setMuted(nextMuted);
+    this.muteButtonText.setText(nextMuted ? '🔇 Sound: Off' : '🔊 Sound: On');
+  }
+
+  /**
+   * Pause overlay: Resume / mute toggle / Restart (same mode) / Menu. Physics is genuinely
+   * stopped here (this.matter.world.pause()), unlike the Collection Book overlay which leaves
+   * the board running underneath — pausing mid-drop is the one place a player can actually step
+   * away without the board filling up while they're gone.
+   */
+  private buildPauseOverlay(): Phaser.GameObjects.Container {
+    const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1410, 0.92).setOrigin(0, 0);
+
+    const title = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 160, '⏸ Paused', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '28px',
+        fontStyle: '800',
+        color: '#fff6e8',
+      })
+      .setOrigin(0.5);
+
+    const makeButton = (y: number, label: string, color: string, onTap: () => void) => {
+      const button = this.add
+        .text(GAME_WIDTH / 2, y, label, {
+          fontFamily: FONT_FAMILY,
+          fontSize: '18px',
+          fontStyle: '700',
+          color: '#3a2b22',
+          backgroundColor: color,
+          padding: { x: 24, y: 12 },
+        })
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true });
+      button.on('pointerdown', (_pointer: Phaser.Input.Pointer, _x: number, _y: number, event: Phaser.Types.Input.EventData) => {
+        event.stopPropagation();
+        onTap();
+      });
+      return button;
+    };
+
+    const resumeButton = makeButton(GAME_HEIGHT / 2 - 80, '▶  Resume', '#ffd873', () => this.closePause());
+    this.muteButtonText = makeButton(GAME_HEIGHT / 2 - 20, this.settings.muted ? '🔇 Sound: Off' : '🔊 Sound: On', '#a7d8ff', () =>
+      this.toggleMute(),
+    );
+    const restartButton = makeButton(GAME_HEIGHT / 2 + 40, '↻  Restart', '#ffe6a7', () => {
+      this.closePause();
+      this.scene.restart({ mode: this.mode });
+    });
+    const menuButton = makeButton(GAME_HEIGHT / 2 + 100, '🏠  Menu', '#c9b6f0', () => {
+      this.closePause();
+      this.scene.start('Menu');
+    });
+
+    const container = this.add.container(0, 0, [overlayBg, title, resumeButton, this.muteButtonText, restartButton, menuButton]);
+    container.setDepth(1000);
+    container.setVisible(false);
+    return container;
   }
 
   /**

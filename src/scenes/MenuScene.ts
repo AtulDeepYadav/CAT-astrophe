@@ -6,6 +6,7 @@ import { todaysModifier } from '../config/dailyChallenges';
 import { ScoreSystem } from '../systems/ScoreSystem';
 import { LeaderboardSystem } from '../systems/LeaderboardSystem';
 import { DailyChallengeSystem } from '../systems/DailyChallengeSystem';
+import { SettingsSystem } from '../systems/SettingsSystem';
 
 /**
  * Title screen — the game used to boot straight into a live round with no beat before the
@@ -16,6 +17,8 @@ import { DailyChallengeSystem } from '../systems/DailyChallengeSystem';
  */
 export class MenuScene extends Phaser.Scene {
   private leaderboardContainer!: Phaser.GameObjects.Container;
+  private settings = new SettingsSystem();
+  private muteButton!: Phaser.GameObjects.Text;
 
   constructor() {
     super('Menu');
@@ -28,6 +31,22 @@ export class MenuScene extends Phaser.Scene {
 
     this.add.image(0, 0, backgroundFrameTextureKey('home', 1)).setOrigin(0, 0);
     this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1008, 0.45).setOrigin(0, 0);
+
+    // Mute toggle, top-right — so a player can silence the game before ever tapping Play, not
+    // only from inside a run's pause menu.
+    this.muteButton = this.add
+      .text(GAME_WIDTH - 32, 32, this.settings.muted ? '🔇' : '🔊', {
+        fontSize: '22px',
+        stroke: '#3a2b22',
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5)
+      .setInteractive({ useHandCursor: true });
+    this.muteButton.on('pointerdown', () => {
+      const nextMuted = !this.settings.muted;
+      this.settings.setMuted(nextMuted);
+      this.muteButton.setText(nextMuted ? '🔇' : '🔊');
+    });
 
     this.add
       .text(GAME_WIDTH / 2, 110, '🐱 Cat-astrophe', {
