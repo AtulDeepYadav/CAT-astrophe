@@ -25,6 +25,34 @@ export function tierColor(tier: CatTier): number {
   return TIER_COLORS[tier];
 }
 
+/**
+ * Cat.ts scales each sprite by HEIGHT only, to match the physics circle's diameter (see its own
+ * doc comment for why — that guarantees apparent size stays monotonic across levels regardless of
+ * how tightly each level's source art happens to be cropped). But the source crops aren't
+ * consistently *square*: several levels' actual cat illustration is noticeably narrower than tall
+ * (measured directly against each cropped sprite's own alpha bounding box), so height-only scaling
+ * left those levels' art filling as little as ~78% of their own hitbox's width while height filled
+ * ~95-99% — visible in-game as an oversized gap of empty space on either side of an otherwise
+ * snugly-resting cat, most noticeable in a pile of several different levels at once.
+ *
+ * This is a horizontal-only correction multiplier layered on top of that height-derived scale
+ * (Cat.ts calls `setScale(visualScale * widthCorrectionForLevel(level), visualScale)`), sized per
+ * level so every cat's visible width fills its hitbox by the same percentage its height already
+ * does — never touching the height scale itself, so the monotonic-size guarantee is untouched.
+ * Levels not listed were already within a percent or two and don't need one.
+ */
+const WIDTH_CORRECTION: Record<number, number> = {
+  4: 1.12,
+  5: 1.22,
+  6: 1.26,
+  7: 1.12,
+  8: 1.15,
+};
+
+export function widthCorrectionForLevel(level: number): number {
+  return WIDTH_CORRECTION[level] ?? 1;
+}
+
 export interface CatLevelData {
   level: number;
   name: string;

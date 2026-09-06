@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GOLDEN_GLOW_TEXTURE, getCatData, textureKeyForLevel } from '../config/catData';
+import { GOLDEN_GLOW_TEXTURE, getCatData, textureKeyForLevel, widthCorrectionForLevel } from '../config/catData';
 import type { AnimFrame } from '../config/catAnimations';
 import { animFrameTextureKey, hasAnimationFrames, idleLoopForLevel, idleLoopTotalMs } from '../config/catAnimations';
 
@@ -87,14 +87,22 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
     // circle's diameter keeps every cat's apparent size strictly tied to `radius`, so it's
     // guaranteed monotonic across levels regardless of the art's own quirks.
     const visualScale = (this.radius * 2) / this.height;
-    this.setScale(visualScale);
+    // A separate, small horizontal-only correction on top of that (see widthCorrectionForLevel's
+    // doc comment) — several levels' art is narrower than tall enough that height-only scaling
+    // left visible empty space on either side of an otherwise snugly-resting cat, reading as
+    // "too much space between cats" in a mixed pile. This never touches the height scale, so the
+    // monotonic-size guarantee above is untouched.
+    const scaleX = visualScale * widthCorrectionForLevel(level);
+    this.setScale(scaleX, visualScale);
 
     // Phaser's Matter Transform component scales the physics BODY along with the sprite
-    // whenever setScale runs (Body.scale under the hood) — without this, every cat's actual
-    // collision circle would silently shrink/grow by `visualScale` too, so same-radius cats
-    // would rest at inconsistent distances and look like they're sinking into each other.
-    // Counter-scale the body back to exactly `data.radius` so only the art moved, not the hitbox.
-    this.scene.matter.body.scale(this.body as MatterJS.BodyType, 1 / visualScale, 1 / visualScale);
+    // whenever setScale runs (Body.scale under the hood, independently per axis) — without this,
+    // every cat's actual collision circle would silently distort into an ellipse matching
+    // whatever the art needed (scaleX above is deliberately != visualScale for several levels),
+    // so same-radius cats would rest at inconsistent distances or merge-detect oddly along one
+    // axis. Counter-scale the body back to exactly `data.radius` on both axes so only the art
+    // moved, not the hitbox — it stays a perfect circle regardless of the visual stretch.
+    this.scene.matter.body.scale(this.body as MatterJS.BodyType, 1 / scaleX, 1 / visualScale);
 
     if (isGolden) {
       this.glow = this.scene.add.image(x, y, GOLDEN_GLOW_TEXTURE);
@@ -198,11 +206,17 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
     }
     this.startledCooldownMs = 300;
     this.scene.tweens.killTweensOf(this);
-    const baseScale = (this.radius * 2) / this.height;
+    // baseScaleX carries the same per-level width correction Cat's constructor applies (see
+    // widthCorrectionForLevel) — recomputed here rather than read off this.scaleX/scaleY because
+    // this can fire while a *previous* squash tween is still mid-flight (killed just above), at a
+    // transient scale that isn't the cat's real resting one. Resetting to a plain uniform
+    // `baseScale` after the squash used to silently undo that correction on every hard impact.
+    const heightScale = (this.radius * 2) / this.height;
+    const baseScaleX = heightScale * widthCorrectionForLevel(this.level);
     this.scene.tweens.add({
       targets: this,
-      scaleX: baseScale * 1.22,
-      scaleY: baseScale * 0.82,
+      scaleX: baseScaleX * 1.22,
+      scaleY: heightScale * 0.82,
       duration: 70,
       yoyo: true,
       ease: 'Sine.easeOut',
@@ -215,7 +229,7 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
       // cheap insurance against the same shape of bug from any tween added here in the future.
       onComplete: () => {
         if (this.active) {
-          this.setScale(baseScale);
+          this.setScale(baseScaleX, heightScale);
         }
       },
     });
@@ -224,12 +238,17 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
 
   /** A bigger, bouncier entrance than the physics "pop" velocity alone gives a freshly merged cat. */
   playBirthBounce() {
-    const targetScale = (this.radius * 2) / this.height;
-    this.setScale(targetScale * 0.55);
+    // Same width correction as the constructor (see widthCorrectionForLevel) — a merged cat is
+    // *destroyed and recreated* as a new Cat instance at the next level (see MergeSystem), so its
+    // constructor already applied this once; the bug this guards against is this bounce-in tween
+    // overwriting that correction back to a plain uniform scale mid-entrance.
+    const heightScale = (this.radius * 2) / this.height;
+    const targetScaleX = heightScale * widthCorrectionForLevel(this.level);
+    this.setScale(targetScaleX * 0.55, heightScale * 0.55);
     this.scene.tweens.add({
       targets: this,
-      scaleX: targetScale,
-      scaleY: targetScale,
+      scaleX: targetScaleX,
+      scaleY: heightScale,
       duration: 320,
       ease: 'Back.easeOut',
     });
