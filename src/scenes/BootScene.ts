@@ -8,7 +8,7 @@ import {
   silhouetteTextureKeyForLevel,
   textureKeyForLevel,
 } from '../config/catData';
-import { WORLD_ZONES, backgroundTextureKeyForZone } from '../config/worldZones';
+import { BG_FRAME_COUNT, WORLD_ZONES, backgroundFrameTextureKey } from '../config/worldZones';
 import { animFrameTextureKey, framesForLevel } from '../config/catAnimations';
 
 const GLOW_TEXTURE_SIZE = 160;
@@ -50,7 +50,12 @@ export class BootScene extends Phaser.Scene {
     }
 
     for (const zone of WORLD_ZONES) {
-      this.load.image(backgroundTextureKeyForZone(zone.key), `assets/backgrounds/${zone.key}.png`);
+      for (let frame = 1; frame <= BG_FRAME_COUNT; frame += 1) {
+        this.load.image(
+          backgroundFrameTextureKey(zone.key, frame),
+          `assets/backgrounds/${zone.key}-f${frame}.png`,
+        );
+      }
     }
   }
 

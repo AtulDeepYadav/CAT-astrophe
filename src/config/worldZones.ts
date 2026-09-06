@@ -31,6 +31,11 @@ export function zoneForLevel(level: number): WorldZoneData {
   return current;
 }
 
-export function backgroundTextureKeyForZone(key: WorldZoneKey): string {
-  return `bg-${key}`;
+/** Each zone backdrop is a 4-frame seamless loop (subtle idle motion — leaves sway, water flows,
+ * clouds drift) rather than one static image. Frames are 1-indexed to match how the source art
+ * itself labels them ("Frame 1 (0.0s)" .. "Frame 4 (3.0s)"). */
+export const BG_FRAME_COUNT = 4;
+
+export function backgroundFrameTextureKey(key: WorldZoneKey, frame: number): string {
+  return `bg-${key}-f${frame}`;
 }

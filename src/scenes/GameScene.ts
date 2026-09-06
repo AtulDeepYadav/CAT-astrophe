@@ -26,7 +26,7 @@ import {
   textureKeyForLevel,
 } from '../config/catData';
 import type { WorldZoneKey } from '../config/worldZones';
-import { backgroundTextureKeyForZone, zoneForLevel } from '../config/worldZones';
+import { BG_FRAME_COUNT, backgroundFrameTextureKey, zoneForLevel } from '../config/worldZones';
 import { Cat } from '../entities/Cat';
 import { registerMergeSystem } from '../systems/MergeSystem';
 import { DangerLineSystem } from '../systems/DangerLineSystem';
@@ -87,6 +87,9 @@ export class GameScene extends Phaser.Scene {
 
   private worldBackground!: Phaser.GameObjects.Image;
   private currentZoneKey: WorldZoneKey = 'home';
+  /** 1-indexed to match the source art's own "Frame 1".."Frame 4" labeling. */
+  private bgFrameIndex = 1;
+  private bgFrameTimer?: Phaser.Time.TimerEvent;
 
   private collection = new CollectionSystem();
   // Lifetime meta-progression systems (Phase 4) — never reset in create(), unlike combo/purrMeter.
@@ -185,11 +188,13 @@ export class GameScene extends Phaser.Scene {
     // World backdrop — drawn first (and pinned behind everything) so it sits under the header,
     // the panel, and the arena's semi-transparent fill. Swaps as `highestLevelThisRun` crosses
     // into a new zone (see updateWorldBackground); baked to exactly GAME_WIDTH x GAME_HEIGHT so
-    // it needs no scaling.
+    // it needs no scaling. Each zone is a 4-frame seamless loop (see startBackgroundLoop) rather
+    // than one static image.
     this.worldBackground = this.add
-      .image(0, 0, backgroundTextureKeyForZone(this.currentZoneKey))
+      .image(0, 0, backgroundFrameTextureKey(this.currentZoneKey, this.bgFrameIndex))
       .setOrigin(0, 0)
       .setDepth(-100);
+    this.startBackgroundLoop();
 
     this.buildHeaderText();
     this.buildPanel();
@@ -515,7 +520,9 @@ export class GameScene extends Phaser.Scene {
       duration: 260,
       ease: 'Sine.easeIn',
       onComplete: () => {
-        this.worldBackground.setTexture(backgroundTextureKeyForZone(zone.key));
+        this.bgFrameIndex = 1;
+        this.worldBackground.setTexture(backgroundFrameTextureKey(zone.key, this.bgFrameIndex));
+        this.startBackgroundLoop();
         this.tweens.add({ targets: this.worldBackground, alpha: 1, duration: 420, ease: 'Sine.easeOut' });
       },
     });
@@ -524,6 +531,24 @@ export class GameScene extends Phaser.Scene {
     // clears the longest of those with room to spare. Otherwise just let the merge burst settle.
     const delay = willDiscoverThisMerge ? 2600 : 400;
     this.time.delayedCall(delay, () => this.showZoneTransitionBanner(zone.key));
+  }
+
+  /**
+   * Each zone backdrop is a 4-frame seamless loop (leaves sway, water flows, clouds drift —
+   * subtle idle motion, not a full animation) that advances one frame per second and wraps back
+   * to frame 1. Restarted (not just left running) on every zone change so a zone always opens on
+   * its own frame 1 instead of whatever frame index the previous zone happened to stop on.
+   */
+  private startBackgroundLoop() {
+    this.bgFrameTimer?.remove();
+    this.bgFrameTimer = this.time.addEvent({
+      delay: 1000,
+      loop: true,
+      callback: () => {
+        this.bgFrameIndex = (this.bgFrameIndex % BG_FRAME_COUNT) + 1;
+        this.worldBackground.setTexture(backgroundFrameTextureKey(this.currentZoneKey, this.bgFrameIndex));
+      },
+    });
   }
 
   /** Once-per-run "you've reached a new area" banner — home has none, it's the starting zone. */
