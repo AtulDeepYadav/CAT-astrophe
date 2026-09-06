@@ -343,6 +343,9 @@ export class GameScene extends Phaser.Scene {
         this.score.add(points);
         this.refreshScoreText();
         this.audio.playMergeTone(newLevel);
+        // Scales with combo the same way the popup's screen shake does — a short tap for a
+        // single merge, a longer double-buzz once a real chain is going.
+        this.vibrate(combo >= MAX_COMBO_TIER ? [25, 30, 25, 30, 40] : combo >= 2 ? [15, 25, 15] : 12);
         this.showMergeBurst(x, y, isGolden);
         this.highestLevelThisRun = Math.max(this.highestLevelThisRun, newLevel);
         this.updateWorldBackground(this.highestLevelThisRun, willDiscoverThisMerge);
@@ -1265,6 +1268,22 @@ export class GameScene extends Phaser.Scene {
   private tryUnlockAchievement(id: string, opts: { silent?: boolean } = {}) {
     if (this.achievements.unlock(id) && !opts.silent) {
       this.showAchievementBanner(id);
+      this.vibrate([20, 40, 20, 40, 60]);
+    }
+  }
+
+  /** No-op on desktop/unsupported browsers (Vibration API is mobile-only) and silently swallows
+   * any exception — some browsers throw rather than returning false when called outside a user
+   * gesture. Gated on the same mute setting as sound: a "quiet" toggle reasonably means don't
+   * buzz the phone either, not just don't play sound. */
+  private vibrate(pattern: number | number[]) {
+    if (this.settings.muted) {
+      return;
+    }
+    try {
+      navigator.vibrate?.(pattern);
+    } catch {
+      // Some browsers throw instead of returning false for disallowed/unsupported calls.
     }
   }
 
@@ -1838,6 +1857,7 @@ export class GameScene extends Phaser.Scene {
   private triggerGameOver() {
     this.isGameOver = true;
     this.tweens.killTweensOf(this.dangerWarningText); // stop the heartbeat pulse if it was mid-danger
+    this.vibrate([60, 50, 100]); // a distinct falling pattern, not just a longer version of the merge tap
 
     const bestCat = getCatData(this.highestLevelThisRun);
     this.finalCatPortrait.setTexture(textureKeyForLevel(this.highestLevelThisRun));
