@@ -1850,6 +1850,15 @@ export class GameScene extends Phaser.Scene {
     this.refreshPurrBar();
     this.audio.playPowerUp();
 
+    // The meter filling and the tap that spends it were already clear, but the payout itself
+    // (cats getting nudged toward center) is easy to miss mid-drop and gives no sense that
+    // something was *earned* — a QA pass flagged this as feeling muted next to every other merge
+    // event's toast/sparks/banner. A quick burst at the bar plus a named toast closes that gap.
+    const burstX = this.purrBarLeft + this.purrBarWidth / 2;
+    const burstY = this.purrBarY + PURR_BAR_HEIGHT / 2;
+    this.spawnComboSparks(burstX, burstY, 6);
+    this.showToast('🧶 Yarn Ball!');
+
     const centerX = (CONTAINER_LEFT + CONTAINER_RIGHT) / 2;
     for (const body of this.matter.world.getAllBodies()) {
       const cat = body.gameObject;
