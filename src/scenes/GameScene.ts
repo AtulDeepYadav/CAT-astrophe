@@ -14,6 +14,7 @@ import {
   PANEL_LEFT,
   PANEL_RIGHT,
   PANEL_TOP,
+  UI_FONT_FAMILY,
   WALL_THICKNESS,
 } from '../config/gameConfig';
 import type { GameMode } from '../config/gameConfig';
@@ -308,7 +309,7 @@ export class GameScene extends Phaser.Scene {
 
     this.dangerWarningText = this.add
       .text(GAME_WIDTH / 2, this.dangerLineY + 8, '', {
-        fontFamily: FONT_FAMILY,
+        fontFamily: UI_FONT_FAMILY,
         fontSize: '16px',
         color: '#e0463f',
         fontStyle: 'bold',
@@ -322,7 +323,7 @@ export class GameScene extends Phaser.Scene {
     const statsTop = PANEL_TOP + 9;
 
     this.scoreValueText = this.add.text(PANEL_LEFT + 10, statsTop, 'SCORE 0', {
-      fontFamily: FONT_FAMILY,
+      fontFamily: UI_FONT_FAMILY,
       fontSize: '16px',
       fontStyle: '800',
       color: '#3a2b22',
@@ -330,7 +331,7 @@ export class GameScene extends Phaser.Scene {
 
     this.bestValueText = this.add
       .text(PANEL_RIGHT - 10, statsTop, `BEST ${this.score.best}`, {
-        fontFamily: FONT_FAMILY,
+        fontFamily: UI_FONT_FAMILY,
         fontSize: '16px',
         fontStyle: '800',
         color: '#3a2b22',
@@ -885,7 +886,7 @@ export class GameScene extends Phaser.Scene {
 
     this.add
       .text(PANEL_LEFT + 8, y + PURR_BAR_HEIGHT / 2, 'PURR', {
-        fontFamily: FONT_FAMILY,
+        fontFamily: UI_FONT_FAMILY,
         fontSize: '9px',
         fontStyle: '800',
         color: '#8a6d4a',
@@ -1134,11 +1135,11 @@ export class GameScene extends Phaser.Scene {
     const tipTexts = tips.map((tip, i) =>
       this.add
         .text(centerX, centerY - 90 + i * 44, tip, {
-          fontFamily: FONT_FAMILY,
+          fontFamily: UI_FONT_FAMILY,
           fontSize: '15px',
           color: '#3a2b22',
           align: 'center',
-          wordWrap: { width: GAME_WIDTH - 90 },
+          wordWrap: { width: 270 },
         })
         .setOrigin(0.5),
     );
@@ -1181,7 +1182,7 @@ export class GameScene extends Phaser.Scene {
       key: def.key,
       text: this.add
         .text(tabX[i], 74, def.label, {
-          fontFamily: FONT_FAMILY,
+          fontFamily: UI_FONT_FAMILY,
           fontSize: '15px',
           color: '#c9bdae',
           fontStyle: 'bold',
@@ -1195,7 +1196,7 @@ export class GameScene extends Phaser.Scene {
 
     const closeHint = this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT - 24, 'Tap anywhere else to close', {
-        fontFamily: FONT_FAMILY,
+        fontFamily: UI_FONT_FAMILY,
         fontSize: '14px',
         color: '#c9bdae',
       })
@@ -1244,7 +1245,7 @@ export class GameScene extends Phaser.Scene {
       const image = this.add.image(x, y, silhouetteTextureKeyForLevel(cat.level));
       const name = this.add
         .text(x, y + cellImageHeight * 0.68, '???', {
-          fontFamily: FONT_FAMILY,
+          fontFamily: UI_FONT_FAMILY,
           fontSize: '12px',
           fontStyle: '700',
           color: '#fdf6ec',
@@ -1252,7 +1253,7 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0.5);
       const tier = this.add
         .text(x, y + cellImageHeight * 0.68 + 14, '', {
-          fontFamily: FONT_FAMILY,
+          fontFamily: UI_FONT_FAMILY,
           fontSize: '10px',
           color: '#c9bdae',
         })
@@ -1268,7 +1269,7 @@ export class GameScene extends Phaser.Scene {
   /** Lifetime totals up top, then a scrollable-free checklist of every achievement (locked ones dimmed, name/desc still shown). */
   private buildStatsTab(): Phaser.GameObjects.Container {
     const summary = this.add.text(GAME_WIDTH / 2, 108, '', {
-      fontFamily: FONT_FAMILY,
+      fontFamily: UI_FONT_FAMILY,
       fontSize: '13px',
       color: '#fdf6ec',
       align: 'center',
@@ -1288,7 +1289,7 @@ export class GameScene extends Phaser.Scene {
       const icon = this.add.text(36, y, achievement.icon, { fontSize: '22px' }).setOrigin(0.5);
       const name = this.add
         .text(62, y - 11, achievement.name, {
-          fontFamily: FONT_FAMILY,
+          fontFamily: UI_FONT_FAMILY,
           fontSize: '15px',
           color: '#fdf6ec',
           fontStyle: 'bold',
@@ -1296,7 +1297,7 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0, 0.5);
       const desc = this.add
         .text(62, y + 11, achievement.description, {
-          fontFamily: FONT_FAMILY,
+          fontFamily: UI_FONT_FAMILY,
           fontSize: '12px',
           color: '#c9bdae',
         })
@@ -1315,7 +1316,7 @@ export class GameScene extends Phaser.Scene {
   private buildStyleTab(): Phaser.GameObjects.Container {
     const intro = this.add
       .text(GAME_WIDTH / 2, 100, 'Pick your Golden Cat glow color', {
-        fontFamily: FONT_FAMILY,
+        fontFamily: UI_FONT_FAMILY,
         fontSize: '14px',
         color: '#c9bdae',
       })
@@ -1334,7 +1335,7 @@ export class GameScene extends Phaser.Scene {
       const circle = this.add.circle(cx, y, 22, option.color, 1).setStrokeStyle(2, 0xfdf6ec, 0.4);
       const name = this.add
         .text(cx + 40, y - 11, option.name, {
-          fontFamily: FONT_FAMILY,
+          fontFamily: UI_FONT_FAMILY,
           fontSize: '15px',
           color: '#fdf6ec',
           fontStyle: 'bold',
@@ -1342,7 +1343,7 @@ export class GameScene extends Phaser.Scene {
         .setOrigin(0, 0.5);
       const status = this.add
         .text(cx + 40, y + 11, '', {
-          fontFamily: FONT_FAMILY,
+          fontFamily: UI_FONT_FAMILY,
           fontSize: '12px',
           color: '#c9bdae',
         })
@@ -1534,7 +1535,7 @@ export class GameScene extends Phaser.Scene {
 
     const eyebrowText = this.add
       .text(textX, 0, eyebrow, {
-        fontFamily: FONT_FAMILY,
+        fontFamily: UI_FONT_FAMILY,
         fontSize: '11px',
         color: accentHex,
         fontStyle: 'bold',
@@ -1688,7 +1689,7 @@ export class GameScene extends Phaser.Scene {
     const subtitleText = subtitle
       ? this.add
           .text(GAME_WIDTH / 2, title.y + 58, subtitle, {
-            fontFamily: FONT_FAMILY,
+            fontFamily: UI_FONT_FAMILY,
             fontSize: '14px',
             color: '#fdf6ec',
             fontStyle: 'bold',
@@ -1954,7 +1955,7 @@ export class GameScene extends Phaser.Scene {
 
     this.reviveCostText = this.add
       .text(centerX, centerY - 45, '', {
-        fontFamily: FONT_FAMILY,
+        fontFamily: UI_FONT_FAMILY,
         fontSize: '16px',
         color: '#6f6152',
         align: 'center',
@@ -2164,7 +2165,7 @@ export class GameScene extends Phaser.Scene {
   private showToast(message: string) {
     const toast = this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 335, message, {
-        fontFamily: FONT_FAMILY,
+        fontFamily: UI_FONT_FAMILY,
         fontSize: '14px',
         color: '#f7ecd9',
       })
