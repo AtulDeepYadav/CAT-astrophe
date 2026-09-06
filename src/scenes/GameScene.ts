@@ -126,6 +126,8 @@ export class GameScene extends Phaser.Scene {
   private finalCatPortrait!: Phaser.GameObjects.Image;
   private purrBarFill!: Phaser.GameObjects.Rectangle;
   private purrBarY = 0;
+  private purrBarLeft = 0;
+  private purrBarWidth = 0;
 
   /** Guards against re-triggering the once-per-episode warning sound / screen shake every frame. */
   private hasPlayedDangerWarning = false;
@@ -547,11 +549,10 @@ export class GameScene extends Phaser.Scene {
     this.combo.update(delta);
     this.idleSystem.update(delta, this.matter.world);
 
-    const wasPurrReady = this.purrMeter.isReady;
+    // Decay now runs continuously (not just once full), so the bar needs to visibly shrink every
+    // frame it's draining, not just on the one instant it empties out.
     this.purrMeter.update(delta);
-    if (wasPurrReady && !this.purrMeter.isReady) {
-      this.refreshPurrBar(); // meter decayed back to empty unspent — drop the pulsing "ready" look
-    }
+    this.refreshPurrBar();
   }
 
   /** Picks a level via the weighted spawn table plus an independent Golden Cat roll. */
@@ -622,22 +623,36 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /** The Purr Meter track + fill, drawn as a thin bar at the bottom of the panel's score section. */
+  /**
+   * The Purr Meter track + fill, drawn as a thin bar at the bottom of the panel's score section.
+   * A small "PURR" label to its left exists purely so a first-time player has any idea what this
+   * bar even is — it wasn't labeled at all before. Hot pink so it actually stands out against the
+   * yellow score bar, brightening further once ready.
+   */
   private buildPurrBar(y: number) {
     this.purrBarY = y;
-    const barLeft = PANEL_LEFT + 8;
-    const barWidth = PANEL_RIGHT - PANEL_LEFT - 16;
+    const labelWidth = 34;
+    this.purrBarLeft = PANEL_LEFT + 8 + labelWidth;
+    this.purrBarWidth = PANEL_RIGHT - PANEL_LEFT - 16 - labelWidth;
 
-    this.add.rectangle(barLeft, y, barWidth, PURR_BAR_HEIGHT, 0x8a6d4a, 0.3).setOrigin(0, 0);
-    this.purrBarFill = this.add.rectangle(barLeft, y, 0, PURR_BAR_HEIGHT, 0xff9d5c, 1).setOrigin(0, 0);
+    this.add
+      .text(PANEL_LEFT + 8, y + PURR_BAR_HEIGHT / 2, 'PURR', {
+        fontFamily: FONT_FAMILY,
+        fontSize: '9px',
+        fontStyle: '800',
+        color: '#8a6d4a',
+      })
+      .setOrigin(0, 0.5);
+
+    this.add.rectangle(this.purrBarLeft, y, this.purrBarWidth, PURR_BAR_HEIGHT, 0x5c3d2e, 0.35).setOrigin(0, 0);
+    this.purrBarFill = this.add.rectangle(this.purrBarLeft, y, 0, PURR_BAR_HEIGHT, 0xff4f9e, 1).setOrigin(0, 0);
   }
 
   private refreshPurrBar() {
-    const barWidth = PANEL_RIGHT - PANEL_LEFT - 16;
-    this.purrBarFill.width = barWidth * this.purrMeter.percent;
+    this.purrBarFill.width = this.purrBarWidth * this.purrMeter.percent;
 
     if (this.purrMeter.isReady) {
-      this.purrBarFill.setFillStyle(0xffd873, 1);
+      this.purrBarFill.setFillStyle(0xfff066, 1);
       if (!this.tweens.isTweening(this.purrBarFill)) {
         this.tweens.add({
           targets: this.purrBarFill,
@@ -650,7 +665,7 @@ export class GameScene extends Phaser.Scene {
     } else {
       this.tweens.killTweensOf(this.purrBarFill);
       this.purrBarFill.setAlpha(1);
-      this.purrBarFill.setFillStyle(0xff9d5c, 1);
+      this.purrBarFill.setFillStyle(0xff4f9e, 1);
     }
   }
 

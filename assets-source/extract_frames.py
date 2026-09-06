@@ -37,12 +37,12 @@ def border_palette(arr, ring=3, quantize=16):
     return np.unique(q, axis=0)
 
 
-def bg_like_adaptive(arr, tol=18):
+def bg_like_adaptive(arr, tol=18, quantize=16):
     """Per-image background classifier: matches pixels against a palette sampled from the
     image's own border (guaranteed background) rather than a fixed global color rule — the
     9 reference sheets mix a cool gray/white transparency checker with a warm cream+paw-print
     design, so no single hardcoded rule covers both."""
-    palette = border_palette(arr)
+    palette = border_palette(arr, quantize=quantize)
     h, w, _ = arr.shape
     flat = arr.reshape(-1, 3).astype(np.int32)
     N = flat.shape[0]
@@ -58,9 +58,9 @@ def bg_like_adaptive(arr, tol=18):
     return (min_dist < tol).reshape(h, w)
 
 
-def remove_bg(im, tol=18):
+def remove_bg(im, tol=18, quantize=16):
     arr = np.array(im.convert('RGB'))
-    bg_like = bg_like_adaptive(arr, tol=tol)
+    bg_like = bg_like_adaptive(arr, tol=tol, quantize=quantize)
     h, w = bg_like.shape
     reachable = np.zeros((h, w), dtype=bool)
     reachable[0, :] = bg_like[0, :]
@@ -140,7 +140,18 @@ LABEL_FRACTION_OVERRIDE = {2: 0.005}
 # The Lion's golden mane sits too close in color to its own warm cream+paw-print
 # background for the default tolerance — a tighter match still fully clears that
 # background (it's a flatter, lower-contrast pattern than the others) without eating fur.
-TOL_OVERRIDE = {10: 3, 6: 4}
+# House Cat's white/cream fur is the same problem taken further: it sits so close to the
+# checkerboard's light squares that anything above tol=6 lets the border-connected flood fill
+# leak straight through the belly/chest/legs, hollowing the whole lower body out into a hole
+# that's invisible against a white viewer background but obvious in-game.
+TOL_OVERRIDE = {10: 3, 6: 4, 4: 6}
+
+# The default border palette was coarsened (quantize 4 -> 16) specifically so Celestial Cat's
+# busy starry-sky border wouldn't blow the palette up too large. That coarser palette is too
+# imprecise for House Cat at any tolerance — it can't find a clean row1/row2 band split at all,
+# and blurs away the fine tol=4 vs. tol=6-ish distinctions that keeping its fur intact depends on.
+# The finer (original) quantize=4 palette fixes both.
+QUANTIZE_OVERRIDE = {4: 4}
 
 # The Lion sheet's hero image is unusually tall (that mane needs room), leaving no clean gap
 # between the hero and row1 for the generic band/column detector to find — row1 there was
@@ -158,8 +169,9 @@ def process(level, filename):
     # TOL_OVERRIDE exists specifically because a *lower* tolerance is needed to stop that level's
     # own fur from being eaten, but that same lower tolerance clears less background overall and
     # can blur away the hero/row1 gap the detector relies on. Final crops use the override cutout.
-    detect_cutout = remove_bg(im, tol=18) if level in TOL_OVERRIDE else None
-    cutout = remove_bg(im, tol=TOL_OVERRIDE.get(level, 18))
+    quantize = QUANTIZE_OVERRIDE.get(level, 16)
+    detect_cutout = remove_bg(im, tol=18, quantize=quantize) if level in TOL_OVERRIDE or level in QUANTIZE_OVERRIDE else None
+    cutout = remove_bg(im, tol=TOL_OVERRIDE.get(level, 18), quantize=quantize)
     alpha = np.array(cutout)[:, :, 3]
     detect_alpha = np.array(detect_cutout)[:, :, 3] if detect_cutout is not None else alpha
 
