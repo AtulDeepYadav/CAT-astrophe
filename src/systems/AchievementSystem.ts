@@ -16,6 +16,7 @@ export const ACHIEVEMENTS: AchievementData[] = [
   { id: 'clutch_save', icon: '💚', name: 'Nine Lives', description: 'Survive a Clutch Save.' },
   { id: 'reach_savannah', icon: '🌅', name: 'World Traveler', description: 'Reach the Savannah.' },
   { id: 'merged_100', icon: '💯', name: 'Century Club', description: 'Merge 100 cats, lifetime.' },
+  { id: 'first_celestial', icon: '✨', name: 'Beyond the Stars', description: 'Create the Celestial Cat.' },
 ];
 
 /**

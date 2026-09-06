@@ -1,13 +1,21 @@
+import Phaser from 'phaser';
+import { hasMergeSound, mergeSoundKey } from '../config/catData';
+
 /**
- * Placeholder cat audio, synthesized with the Web Audio API instead of sound files — matching
- * the placeholder-first approach used for sprites. Swap `playMergeTone`/`playIdlePurr` for real
- * meow/purr/roar clips later without changing any call sites.
+ * Cat audio: real recorded feline vocalizations (see public/assets/audio/merge/, preloaded by
+ * BootScene) for the merge sound wherever a level has one, synthesized Web Audio tones for
+ * everything else (levels with no real-world animal, plus every other effect in this class).
  *
- * Merge tone scales with level (small cats = quick bright pop, big cats = deeper/longer growl).
  * Idle purr is a soft low-volume blip, meant to be played rarely and randomized per cat.
  */
 export class AudioSystem {
   private ctx: AudioContext | null = null;
+  /** Optional — lets playMergeTone play a real preloaded clip via Phaser's sound manager instead of synthesizing. */
+  private scene: Phaser.Scene | null;
+
+  constructor(scene: Phaser.Scene | null = null) {
+    this.scene = scene;
+  }
 
   /** Must be called from a real user gesture (e.g. the first tap) — autoplay policies block audio otherwise. */
   unlock() {
@@ -18,6 +26,11 @@ export class AudioSystem {
   }
 
   playMergeTone(level: number) {
+    if (this.scene && hasMergeSound(level)) {
+      this.scene.sound.play(mergeSoundKey(level), { volume: 0.6 });
+      return;
+    }
+
     const ctx = this.ensureContext();
     if (!ctx) {
       return;
@@ -196,6 +209,44 @@ export class AudioSystem {
     lfo.stop(stopAt);
     growl.start(now);
     growl.stop(stopAt);
+  }
+
+  /** Shimmering ascending arpeggio for the Celestial Cat cinematic — no real animal to record, so this stays synthesized. */
+  playCelestialChime() {
+    const ctx = this.ensureContext();
+    if (!ctx) {
+      return;
+    }
+
+    const now = ctx.currentTime;
+    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5]; // C5 E5 G5 C6 E6 — a bright major arpeggio
+
+    notes.forEach((freq, i) => {
+      const start = now + i * 0.11;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, start);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.22, start + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.9);
+
+      // A fast shimmering tremolo layered on top reads as "sparkly" rather than a plain tone.
+      const shimmer = ctx.createOscillator();
+      const shimmerGain = ctx.createGain();
+      shimmer.frequency.setValueAtTime(28, start);
+      shimmerGain.gain.setValueAtTime(freq * 0.01, start);
+      shimmer.connect(shimmerGain);
+      shimmerGain.connect(osc.frequency);
+
+      osc.start(start);
+      osc.stop(start + 0.95);
+      shimmer.start(start);
+      shimmer.stop(start + 0.95);
+    });
   }
 
   private ensureContext(): AudioContext | null {

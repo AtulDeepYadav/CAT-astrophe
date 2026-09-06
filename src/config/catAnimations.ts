@@ -22,6 +22,9 @@ const FRAMES_BY_LEVEL: Record<number, AnimFrame[]> = {
   8: ['idle', 'blink'],
   9: ['idle', 'blink'],
   10: ['idle', 'blink'],
+  11: ['idle', 'blink'],
+  12: ['idle', 'blink'],
+  13: ['idle', 'blink'],
 };
 
 export function hasAnimationFrames(level: number): boolean {

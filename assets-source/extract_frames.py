@@ -16,17 +16,24 @@ FILES = {
     8: '8. Leopard.png',
     9: '9. Tiger.png',
     10: '10. Lion.png',
+    11: '11. White Lion.png',
+    12: '12. Golden L.png',
+    13: '13. Celestial Cat.png',
 }
 
 
-def border_palette(arr, ring=3):
+def border_palette(arr, ring=3, quantize=16):
+    """Coarser quantization (16 vs. a naive 4) keeps a busy border — a starry night sky has
+    hundreds of individual star/nebula shades — from blowing the palette up to a size that makes
+    the per-pixel distance pass (chunk x palette x 3 floats) too slow or too much memory. Distance
+    matching below still runs against exact pixel values, so this only thins the seed points."""
     pts = np.concatenate([
         arr[:ring, :, :].reshape(-1, 3),
         arr[-ring:, :, :].reshape(-1, 3),
         arr[:, :ring, :].reshape(-1, 3),
         arr[:, -ring:, :].reshape(-1, 3),
     ], axis=0).astype(np.int32)
-    q = (pts // 4) * 4
+    q = (pts // quantize) * quantize
     return np.unique(q, axis=0)
 
 
@@ -40,7 +47,10 @@ def bg_like_adaptive(arr, tol=18):
     flat = arr.reshape(-1, 3).astype(np.int32)
     N = flat.shape[0]
     min_dist = np.full(N, 1e9, dtype=np.float32)
-    chunk = 200000
+    # A busy border (e.g. a starry night sky with many distinct star/nebula colors) can blow the
+    # palette up to 1000+ entries — chunk size must shrink to match so chunk*palette*3 floats
+    # stays within a sane memory budget regardless of how large the palette turns out to be.
+    chunk = max(2000, min(200000, int(1e7 / max(1, palette.shape[0]))))
     for i in range(0, N, chunk):
         block = flat[i:i + chunk][:, None, :]
         d = np.sqrt((((block - palette[None, :, :]).astype(np.float32)) ** 2).sum(axis=2)).min(axis=1)

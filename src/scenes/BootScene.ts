@@ -1,6 +1,13 @@
 import Phaser from 'phaser';
 import { FONT_FAMILY, GAME_HEIGHT, GAME_WIDTH } from '../config/gameConfig';
-import { CAT_LEVELS, GOLDEN_GLOW_TEXTURE, silhouetteTextureKeyForLevel, textureKeyForLevel } from '../config/catData';
+import {
+  CAT_LEVELS,
+  GOLDEN_GLOW_TEXTURE,
+  hasMergeSound,
+  mergeSoundKey,
+  silhouetteTextureKeyForLevel,
+  textureKeyForLevel,
+} from '../config/catData';
 import { WORLD_ZONES, backgroundTextureKeyForZone } from '../config/worldZones';
 import { animFrameTextureKey, framesForLevel } from '../config/catAnimations';
 
@@ -35,6 +42,10 @@ export class BootScene extends Phaser.Scene {
           animFrameTextureKey(cat.level, frame),
           `assets/sprites/cats/anim/cat-${cat.level}-${frame}.png`,
         );
+      }
+
+      if (hasMergeSound(cat.level)) {
+        this.load.audio(mergeSoundKey(cat.level), `assets/audio/merge/cat-${cat.level}.mp3`);
       }
     }
 
@@ -87,7 +98,7 @@ export class BootScene extends Phaser.Scene {
 
   private buildLoadingBar() {
     this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 30, 'Loading the Kingdom...', {
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 30, 'Brewing a cat-astrophe...', {
         fontFamily: FONT_FAMILY,
         fontSize: '14px',
         color: '#3a2b22',

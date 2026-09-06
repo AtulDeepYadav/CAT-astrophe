@@ -51,10 +51,16 @@ const CLUTCH_SAVE_BONUS = 25;
 /** Danger line color ramps from calm orange to alarm red as progress (0..1) climbs. */
 const DANGER_COLOR_START = 0xffa53d;
 const DANGER_COLOR_END = 0xe0463f;
+/** Lion is the mid-game "king" milestone; three Legendary+ tiers now exist above it. */
+const LION_LEVEL = 10;
 /** One-time bonus for the Lion cinematic moment (first-ever Lion). */
 const LION_DISCOVERY_BONUS = 200;
+/** One-time bonus for the Celestial Cat cinematic (first-ever true final form). */
+const CELESTIAL_DISCOVERY_BONUS = 500;
 /** Accent color for achievement-unlock banners — distinct from the cat-discovery gold. */
 const ACHIEVEMENT_ACCENT = 0x8ec6ff;
+/** Shared between buildCatsTab (layout) and openCollectionBook (re-scaling on open) so they can't drift apart. */
+const COLLECTION_CELL_IMAGE_HEIGHT = 50;
 
 type CollectionBookTab = 'cats' | 'stats' | 'style';
 
@@ -84,7 +90,12 @@ export class GameScene extends Phaser.Scene {
   private catsTabContainer!: Phaser.GameObjects.Container;
   private statsTabContainer!: Phaser.GameObjects.Container;
   private styleTabContainer!: Phaser.GameObjects.Container;
-  private collectionCells: { level: number; image: Phaser.GameObjects.Image; name: Phaser.GameObjects.Text }[] = [];
+  private collectionCells: {
+    level: number;
+    image: Phaser.GameObjects.Image;
+    name: Phaser.GameObjects.Text;
+    tier: Phaser.GameObjects.Text;
+  }[] = [];
   private collectionButtonBounds = { x: 0, y: 0, radius: 22 };
   private cosmeticSwatchBounds: { id: string; x: number; y: number; radius: number }[] = [];
 
@@ -112,7 +123,7 @@ export class GameScene extends Phaser.Scene {
   private score = new ScoreSystem();
   private combo = new ComboSystem();
   private purrMeter = new PurrMeterSystem();
-  private audio = new AudioSystem();
+  private audio = new AudioSystem(this);
   private dangerLine!: DangerLineSystem;
   private idleSystem!: IdleSystem;
   private canDrop = true;
@@ -279,17 +290,22 @@ export class GameScene extends Phaser.Scene {
           this.tryUnlockAchievement('combo_5');
         }
 
-        if (newLevel === MAX_CAT_LEVEL) {
+        if (newLevel === LION_LEVEL) {
           this.stats.recordLion();
           this.refreshCrownText();
           // Silent: the Lion cinematic below is already the celebration for this moment —
           // a second banner popping up mid-cinematic would just be visual clutter.
           this.tryUnlockAchievement('first_lion', { silent: true });
         }
+        if (newLevel === MAX_CAT_LEVEL) {
+          this.tryUnlockAchievement('first_celestial', { silent: true });
+        }
 
         if (this.collection.discover(newLevel)) {
-          if (newLevel === MAX_CAT_LEVEL) {
+          if (newLevel === LION_LEVEL) {
             this.showLionCinematic();
+          } else if (newLevel === MAX_CAT_LEVEL) {
+            this.showCelestialCinematic();
           } else {
             this.showDiscoveryBanner(newLevel);
           }
@@ -389,7 +405,7 @@ export class GameScene extends Phaser.Scene {
     // A white stroke keeps this legible over every zone backdrop, from a bright cosy room to a
     // dark forest to an orange sunset — a plain fill alone only worked against the old flat pink.
     this.add
-      .text(GAME_WIDTH / 2, HEADER_TEXT_HEIGHT / 2, '🐱 Cat Kingdom', {
+      .text(GAME_WIDTH / 2, HEADER_TEXT_HEIGHT / 2, '🐱 Cat-astrophe', {
         fontFamily: FONT_FAMILY,
         fontSize: '26px',
         color: '#3a2b22',
@@ -447,15 +463,9 @@ export class GameScene extends Phaser.Scene {
       br: 0,
     });
 
-    graphics.fillStyle(0xf5efe4, 0.28);
-    graphics.fillRoundedRect(PANEL_LEFT, PANEL_DIVIDER_Y, width, PANEL_BOTTOM - PANEL_DIVIDER_Y, {
-      tl: 0,
-      tr: 0,
-      bl: radius,
-      br: radius,
-    });
-
-    graphics.lineStyle(4, 0x1a1410, 1);
+    // Arena fill removed entirely (was a translucent wash) — the world background now shows
+    // straight through the play area, with only the gold border below marking its edges.
+    graphics.lineStyle(4, 0xb8860b, 1);
     graphics.strokeRoundedRect(PANEL_LEFT, PANEL_TOP, width, PANEL_BOTTOM - PANEL_TOP, radius);
     graphics.lineBetween(PANEL_LEFT, PANEL_DIVIDER_Y, PANEL_RIGHT, PANEL_DIVIDER_Y);
   }
@@ -616,7 +626,7 @@ export class GameScene extends Phaser.Scene {
     const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1410, 0.97).setOrigin(0, 0);
 
     const title = this.add
-      .text(GAME_WIDTH / 2, 40, '📖 Cat Kingdom', {
+      .text(GAME_WIDTH / 2, 40, '📖 Cat-astrophe', {
         fontFamily: FONT_FAMILY,
         fontSize: '20px',
         color: '#fdf6ec',
@@ -669,30 +679,41 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildCatsTab(): Phaser.GameObjects.Container {
-    const colX = [GAME_WIDTH * 0.27, GAME_WIDTH * 0.73];
-    const gridTop = 130;
+    // 3 columns (13 cats needs 5 rows either way — 2 columns would need 5 rows at a much taller
+    // cell height that no longer fits the tab; 3 columns keeps the same row count as the old
+    // 10-cat/2-column grid did, just a little narrower per cell).
+    const colX = [GAME_WIDTH * 0.2, GAME_WIDTH * 0.5, GAME_WIDTH * 0.8];
+    const gridTop = 128;
     const rowHeight = 138;
-    const cellImageHeight = 58;
+    const cellImageHeight = COLLECTION_CELL_IMAGE_HEIGHT;
 
     const children: Phaser.GameObjects.GameObject[] = [];
     this.collectionCells = [];
     for (const cat of CAT_LEVELS) {
-      const row = Math.floor((cat.level - 1) / 2);
-      const col = (cat.level - 1) % 2;
+      const row = Math.floor((cat.level - 1) / 3);
+      const col = (cat.level - 1) % 3;
       const x = colX[col];
       const y = gridTop + row * rowHeight;
 
       const image = this.add.image(x, y, silhouetteTextureKeyForLevel(cat.level));
       const name = this.add
-        .text(x, y + cellImageHeight * 0.7, '???', {
+        .text(x, y + cellImageHeight * 0.68, '???', {
           fontFamily: FONT_FAMILY,
-          fontSize: '14px',
+          fontSize: '12px',
+          fontStyle: '700',
           color: '#fdf6ec',
         })
         .setOrigin(0.5);
+      const tier = this.add
+        .text(x, y + cellImageHeight * 0.68 + 14, '', {
+          fontFamily: FONT_FAMILY,
+          fontSize: '10px',
+          color: '#c9bdae',
+        })
+        .setOrigin(0.5);
 
-      this.collectionCells.push({ level: cat.level, image, name });
-      children.push(image, name);
+      this.collectionCells.push({ level: cat.level, image, name, tier });
+      children.push(image, name, tier);
     }
 
     return this.add.container(0, 0, children);
@@ -795,11 +816,11 @@ export class GameScene extends Phaser.Scene {
   private openCollectionBook() {
     for (const cell of this.collectionCells) {
       const discovered = this.collection.isDiscovered(cell.level);
-      const height = 58;
 
       cell.image.setTexture(discovered ? textureKeyForLevel(cell.level) : silhouetteTextureKeyForLevel(cell.level));
-      cell.image.setScale(height / cell.image.height);
+      cell.image.setScale(COLLECTION_CELL_IMAGE_HEIGHT / cell.image.height);
       cell.name.setText(discovered ? getCatData(cell.level).name : '???');
+      cell.tier.setText(discovered ? getCatData(cell.level).tier : '');
     }
 
     const s = this.stats.get();
@@ -998,13 +1019,36 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /**
-   * The big moment: the first-ever Lion. Freezes attention on a golden flash, a camera punch,
-   * a roar, and a bonus — per the doc's "THE KING HAS ARRIVED" beat.
-   */
+  /** The first-ever Lion: golden flash, camera punch, a roar, and a bonus — "THE KING HAS ARRIVED". */
   private showLionCinematic() {
     this.audio.playLionRoar();
-    this.score.add(LION_DISCOVERY_BONUS);
+    this.playMilestoneCinematic({
+      tintColor: 0xffd873,
+      textColor: '#ffd873',
+      title: '👑 THE KING HAS ARRIVED 👑',
+      bonus: LION_DISCOVERY_BONUS,
+    });
+  }
+
+  /** The first-ever Celestial Cat: the same big beat, recolored cosmic-purple, with a bigger bonus. */
+  private showCelestialCinematic() {
+    this.audio.playCelestialChime();
+    this.playMilestoneCinematic({
+      tintColor: 0x8a6dff,
+      textColor: '#c9b6ff',
+      title: '✨ THE CELESTIAL CAT AWAKENS ✨',
+      bonus: CELESTIAL_DISCOVERY_BONUS,
+    });
+  }
+
+  /**
+   * Shared "big moment" cinematic beat: freezes attention on a colored flash, a camera punch,
+   * and a title card, plus a score bonus. Lion and Celestial Cat both use this, just recolored
+   * and retitled — see showLionCinematic/showCelestialCinematic for the sound each one plays.
+   */
+  private playMilestoneCinematic(opts: { tintColor: number; textColor: string; title: string; bonus: number }) {
+    const { tintColor, textColor, title: titleStr, bonus } = opts;
+    this.score.add(bonus);
     this.refreshScoreText();
 
     const darken = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0).setOrigin(0, 0).setDepth(900);
@@ -1012,15 +1056,15 @@ export class GameScene extends Phaser.Scene {
       .image(GAME_WIDTH / 2, GAME_HEIGHT / 2, GOLDEN_GLOW_TEXTURE)
       .setDepth(901)
       .setBlendMode(Phaser.BlendModes.ADD)
-      .setTint(0xffd873)
+      .setTint(tintColor)
       .setAlpha(0);
     glow.setDisplaySize(GAME_WIDTH * 2.5, GAME_WIDTH * 2.5);
 
     const title = this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2, '👑 THE KING HAS ARRIVED 👑', {
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2, titleStr, {
         fontFamily: FONT_FAMILY,
         fontSize: '22px',
-        color: '#ffd873',
+        color: textColor,
         fontStyle: 'bold',
         align: 'center',
         stroke: '#3a2b22',
