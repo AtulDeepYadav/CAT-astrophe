@@ -71,7 +71,7 @@ export class BootScene extends Phaser.Scene {
     // not just for one frame. Race against a timeout so a slow/unavailable font API can never
     // block the game from starting at all.
     await Promise.race([this.waitForFont(), new Promise((resolve) => this.time.delayedCall(2500, resolve))]);
-    this.scene.start('Game');
+    this.scene.start('Menu');
   }
 
   private async waitForFont() {

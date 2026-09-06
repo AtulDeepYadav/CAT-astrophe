@@ -1,6 +1,5 @@
 import Phaser from 'phaser';
 import { Cat } from '../entities/Cat';
-import { DANGER_LINE_Y } from '../config/gameConfig';
 
 /** Matter body speed below which a cat counts as "resting" rather than mid-drop/mid-bounce. */
 const RESTING_SPEED_THRESHOLD = 0.4;
@@ -8,6 +7,9 @@ const RESTING_SPEED_THRESHOLD = 0.4;
 const DANGER_TIME_LIMIT_MS = 2500;
 
 export interface DangerLineSystemOptions {
+  /** Where the danger line sits this run — the base DANGER_LINE_Y, or shifted by a Daily
+   * Challenge modifier (see GameScene's dangerLineY). */
+  dangerLineY: number;
   /** Fires every frame while the countdown is running: seconds left, and progress 0 (just entered) -> 1 (out of time). */
   onDangerTick: (secondsRemaining: number, progress: number) => void;
   /** Fires once when the board drops back below the line before time runs out, with how long the danger lasted. */
@@ -43,7 +45,7 @@ export class DangerLineSystem {
       }
       const top = cat.y - cat.radius;
       const speed = (body as unknown as { speed: number }).speed;
-      return top < DANGER_LINE_Y && speed < RESTING_SPEED_THRESHOLD;
+      return top < this.options.dangerLineY && speed < RESTING_SPEED_THRESHOLD;
     });
 
     if (anyCatInDanger) {

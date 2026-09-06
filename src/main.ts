@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { GAME_HEIGHT, GAME_WIDTH, MATTER_CONFIG } from './config/gameConfig';
 import { BootScene } from './scenes/BootScene';
+import { MenuScene } from './scenes/MenuScene';
 import { GameScene } from './scenes/GameScene';
 import './style.css';
 
@@ -19,7 +20,7 @@ const config: Phaser.Types.Core.GameConfig = {
     default: 'matter',
     matter: MATTER_CONFIG,
   },
-  scene: [BootScene, GameScene],
+  scene: [BootScene, MenuScene, GameScene],
 };
 
 const game = new Phaser.Game(config);

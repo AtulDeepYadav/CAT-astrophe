@@ -36,6 +36,10 @@ export const CONTAINER_FLOOR = PANEL_BOTTOM - WALL_THICKNESS;
 /** Danger line y-position — cats resting above this for too long end the game. */
 export const DANGER_LINE_Y = CONTAINER_TOP + 30;
 
+/** 'zen' skips the danger line/game-over entirely; 'daily' applies that day's seeded modifier
+ * (see dailyChallenges.ts) on top of otherwise-normal rules. */
+export type GameMode = 'normal' | 'zen' | 'daily';
+
 export const MATTER_CONFIG = {
   gravity: { x: 0, y: 1 },
   debug: false,

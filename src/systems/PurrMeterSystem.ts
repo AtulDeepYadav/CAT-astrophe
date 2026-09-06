@@ -1,5 +1,7 @@
 const METER_MAX = 100;
-const GAIN_PER_MERGE = 14;
+/** Exported so callers (Daily Challenge's Purr Party modifier) can scale it rather than
+ * hardcoding a second copy of the base value. */
+export const GAIN_PER_MERGE = 14;
 /** How long after the last gain (at any fill level, not just full) before the meter starts draining. */
 const DECAY_DELAY_MS = 1000;
 /** Drain rate once decay kicks in — a full meter empties out over this many ms. */

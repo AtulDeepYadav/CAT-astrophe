@@ -16,6 +16,7 @@ import {
   PANEL_TOP,
   WALL_THICKNESS,
 } from '../config/gameConfig';
+import type { GameMode } from '../config/gameConfig';
 import {
   CAT_LEVELS,
   GOLDEN_GLOW_TEXTURE,
@@ -32,13 +33,17 @@ import { registerMergeSystem } from '../systems/MergeSystem';
 import { DangerLineSystem } from '../systems/DangerLineSystem';
 import { ScoreSystem } from '../systems/ScoreSystem';
 import { ComboSystem, MAX_COMBO_TIER, comboLabel } from '../systems/ComboSystem';
-import { PurrMeterSystem } from '../systems/PurrMeterSystem';
+import { GAIN_PER_MERGE, PurrMeterSystem } from '../systems/PurrMeterSystem';
 import { AudioSystem } from '../systems/AudioSystem';
 import { IdleSystem } from '../systems/IdleSystem';
 import { CollectionSystem } from '../systems/CollectionSystem';
 import { StatsSystem } from '../systems/StatsSystem';
 import { ACHIEVEMENTS, AchievementSystem } from '../systems/AchievementSystem';
 import { COSMETIC_OPTIONS, CosmeticsSystem } from '../systems/CosmeticsSystem';
+import type { DailyModifier } from '../config/dailyChallenges';
+import { todayKey, todaysModifier } from '../config/dailyChallenges';
+import { LeaderboardSystem } from '../systems/LeaderboardSystem';
+import { DailyChallengeSystem } from '../systems/DailyChallengeSystem';
 
 /** Minimum time between drops, so spam-tapping can't stack cats on top of each other instantly. */
 const DROP_COOLDOWN_MS = 350;
@@ -151,8 +156,22 @@ export class GameScene extends Phaser.Scene {
   private canDrop = true;
   private isGameOver = false;
 
+  // Game mode (see MenuScene) — 'normal' unless launched otherwise via init(data).
+  private mode: GameMode = 'normal';
+  private modifier: DailyModifier | null = null;
+  private dangerLineY = DANGER_LINE_Y;
+  private leaderboard = new LeaderboardSystem();
+  private dailyChallenge = new DailyChallengeSystem();
+
   constructor() {
     super('Game');
+  }
+
+  /** Phaser calls this before create(), with whatever was passed to scene.start('Game', data). */
+  init(data: { mode?: GameMode }) {
+    this.mode = data.mode ?? 'normal';
+    this.modifier = this.mode === 'daily' ? todaysModifier() : null;
+    this.dangerLineY = DANGER_LINE_Y + (this.modifier?.dangerLineShiftPx ?? 0);
   }
 
   create() {
@@ -214,9 +233,10 @@ export class GameScene extends Phaser.Scene {
     // Danger line marker + its "about to lose" countdown text (hidden until triggered).
     this.dangerLineGraphics = this.add.graphics();
     this.drawDangerLine(DANGER_COLOR_START, 0.8);
+    this.dangerLineGraphics.setVisible(this.mode !== 'zen'); // nothing to warn about if it can't end the run
 
     this.dangerWarningText = this.add
-      .text(GAME_WIDTH / 2, DANGER_LINE_Y + 8, '', {
+      .text(GAME_WIDTH / 2, this.dangerLineY + 8, '', {
         fontFamily: FONT_FAMILY,
         fontSize: '16px',
         color: '#e0463f',
@@ -290,7 +310,7 @@ export class GameScene extends Phaser.Scene {
         this.highestLevelThisRun = Math.max(this.highestLevelThisRun, newLevel);
         this.updateWorldBackground(this.highestLevelThisRun, willDiscoverThisMerge);
 
-        this.purrMeter.addProgress();
+        this.purrMeter.addProgress(GAIN_PER_MERGE * (this.modifier?.purrGainMultiplier ?? 1));
         this.refreshPurrBar();
 
         this.stats.recordMerge();
@@ -350,6 +370,7 @@ export class GameScene extends Phaser.Scene {
     this.idleSystem = new IdleSystem(this, this.audio);
 
     this.dangerLine = new DangerLineSystem({
+      dangerLineY: this.dangerLineY,
       onDangerTick: (secondsRemaining, progress) => {
         this.dangerWarningText.setText(`⚠ MEOW MELTDOWN ${secondsRemaining.toFixed(1)}s`);
         if (!this.hasPlayedDangerWarning) {
@@ -450,10 +471,18 @@ export class GameScene extends Phaser.Scene {
   private buildHeaderText() {
     // A white stroke keeps this legible over every zone backdrop, from a bright cosy room to a
     // dark forest to an orange sunset — a plain fill alone only worked against the old flat pink.
+    // Swaps to a mode badge in Zen/Daily instead of adding a second header line — the title is
+    // branding-only during play, so it's the cheapest slot to repurpose as a mode indicator.
+    const titleText =
+      this.mode === 'zen'
+        ? '🌙 Zen Mode'
+        : this.mode === 'daily' && this.modifier
+          ? `📅 ${this.modifier.name}`
+          : '🐱 Cat-astrophe';
     this.add
-      .text(GAME_WIDTH / 2, HEADER_TEXT_HEIGHT / 2, '🐱 Cat-astrophe', {
+      .text(GAME_WIDTH / 2, HEADER_TEXT_HEIGHT / 2, titleText, {
         fontFamily: FONT_FAMILY,
-        fontSize: '26px',
+        fontSize: this.mode === 'normal' ? '26px' : '21px',
         color: '#3a2b22',
         fontStyle: 'bold',
         stroke: '#fdf6ec',
@@ -626,7 +655,12 @@ export class GameScene extends Phaser.Scene {
     if (this.isGameOver) {
       return;
     }
-    this.dangerLine.update(delta, this.matter.world);
+    // Zen Mode's whole point is no fail state — skip the check entirely rather than just
+    // ignoring its game-over callback, so the warning text/sound/line-color-ramp never fire
+    // misleadingly for a danger that can't actually end the run.
+    if (this.mode !== 'zen') {
+      this.dangerLine.update(delta, this.matter.world);
+    }
     this.combo.update(delta);
     this.idleSystem.update(delta, this.matter.world);
 
@@ -638,7 +672,11 @@ export class GameScene extends Phaser.Scene {
 
   /** Picks a level via the weighted spawn table plus an independent Golden Cat roll. */
   private rollLevel(): { level: number; isGolden: boolean } {
-    return { level: pickWeightedSpawnLevel(), isGolden: Math.random() < GOLDEN_CAT_CHANCE };
+    const goldenChance = GOLDEN_CAT_CHANCE * (this.modifier?.goldenChanceMultiplier ?? 1);
+    return {
+      level: pickWeightedSpawnLevel(this.modifier?.spawnLevels),
+      isGolden: Math.random() < goldenChance,
+    };
   }
 
   private refreshScoreText() {
@@ -1448,7 +1486,7 @@ export class GameScene extends Phaser.Scene {
   private drawDangerLine(color: number, alpha: number) {
     this.dangerLineGraphics.clear();
     this.dangerLineGraphics.lineStyle(2, color, alpha);
-    this.dangerLineGraphics.lineBetween(CONTAINER_LEFT, DANGER_LINE_Y, CONTAINER_RIGHT, DANGER_LINE_Y);
+    this.dangerLineGraphics.lineBetween(CONTAINER_LEFT, this.dangerLineY, CONTAINER_RIGHT, this.dangerLineY);
   }
 
   /** Escalates the danger line's color toward alarm-red and shakes the screen once past the halfway point. */
@@ -1667,11 +1705,37 @@ export class GameScene extends Phaser.Scene {
 
     const bestCat = getCatData(this.highestLevelThisRun);
     this.finalCatPortrait.setTexture(textureKeyForLevel(this.highestLevelThisRun));
-    this.finalScoreText.setText(`You reached ${bestCat.name}!\nScore: ${this.score.score}\nBest: ${this.score.best}`);
+    const summary = `You reached ${bestCat.name}!\nScore: ${this.score.score}\nBest: ${this.score.best}`;
+
+    // Zen Mode has no fail state, so triggerGameOver is never called for it in the first place —
+    // every run that gets here is a normal or daily attempt, both fair game for the leaderboard.
+    const rank = this.leaderboard.submit({
+      score: this.score.score,
+      catName: bestCat.name,
+      date: todayKey(),
+      mode: this.mode === 'daily' ? 'daily' : 'normal',
+    });
+
+    // At most one bonus line — the game-over overlay only has so much vertical room before
+    // running into the restart hint/share button below it, and a leaderboard rank plus a daily
+    // result together would be two. The daily result is the more specific, mode-relevant one
+    // when both would otherwise apply.
+    let bonusLine = '';
+    if (this.mode === 'daily') {
+      const isNewDailyBest = this.dailyChallenge.recordResult(this.score.score);
+      bonusLine = isNewDailyBest ? "New best for today's challenge!" : `Today's best: ${this.dailyChallenge.bestScoreToday}`;
+    } else if (rank) {
+      bonusLine = `#${rank} on the leaderboard!`;
+    }
+
+    this.finalScoreText.setText(bonusLine ? `${summary}\n${bonusLine}` : summary);
     this.gameOverContainer.setVisible(true);
 
     this.input.once('pointerdown', () => {
-      this.scene.restart();
+      // Explicit mode, not a bare restart() — Phaser doesn't carry init() data forward on its
+      // own, so an argument-less restart from a Daily Challenge run would silently drop the
+      // player back into Normal mode instead of letting them retry the same challenge.
+      this.scene.restart({ mode: this.mode });
     });
   }
 }
