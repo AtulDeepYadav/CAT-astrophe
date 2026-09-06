@@ -206,7 +206,18 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
       duration: 70,
       yoyo: true,
       ease: 'Sine.easeOut',
-      onComplete: () => this.setScale(baseScale),
+      // Guard against a merge destroying this cat's Matter body in the ~70-140ms this tween is
+      // in flight (a hard impact frequently precedes a merge by exactly that little) — setScale
+      // reaches into Body.scale, which throws on a body that's gone, and an uncaught throw here
+      // happens inside TweenManager.update, deep in Phaser's own step() — nothing catches it, so
+      // it kills the requestAnimationFrame loop outright and freezes the entire game, not just
+      // this tween. destroy() below kills any tween targeting `this` outright, but this guard is
+      // cheap insurance against the same shape of bug from any tween added here in the future.
+      onComplete: () => {
+        if (this.active) {
+          this.setScale(baseScale);
+        }
+      },
     });
     return true;
   }
@@ -225,6 +236,14 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
   }
 
   destroy(fromScene?: boolean) {
+    // Kill first, before the body is gone — a merge (or a hard-impact reaction) can destroy this
+    // cat while a tween (playStartledSquash, playBirthBounce, the golden glow loop) is still
+    // running against it. An in-flight tween's next update/onComplete would otherwise touch
+    // scaleX/scaleY on a Matter game object with no body left, which throws from deep inside
+    // Phaser's own TweenManager.update — uncaught there, that exception kills the game's
+    // requestAnimationFrame loop outright instead of just this one tween, freezing the whole
+    // game (see playStartledSquash's onComplete for exactly the crash this prevents).
+    this.scene?.tweens.killTweensOf(this);
     this.glow?.destroy();
     this.glow = null;
     super.destroy(fromScene);
