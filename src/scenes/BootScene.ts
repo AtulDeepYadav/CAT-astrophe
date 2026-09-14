@@ -98,14 +98,22 @@ export class BootScene extends Phaser.Scene {
     // block the game from starting at all.
     await Promise.race([this.waitForFont(), new Promise((resolve) => this.time.delayedCall(2500, resolve))]);
     
-    // Check for Challenge Deep Link
+    // A friend's "Challenge a Friend" share link (see GameScene's shareContent) — ?mode=challenge
+    // routes straight into a Game run seeded to match the sender's exact drop sequence instead of
+    // the normal Menu. `target` is untrusted user input via the URL: parseInt on garbage (or a
+    // tampered/missing value) produces NaN, which the HUD's `this.targetScore ? ... : ...` check
+    // already treats as falsy and quietly falls back to the normal "BEST" display — but parsing it
+    // explicitly here (rather than relying on that to catch it) keeps a bad value from ever being
+    // stored as a real number goal anywhere else that might not have the same falsy-NaN guard.
     const urlParams = new URLSearchParams(window.location.search);
     const mode = urlParams.get('mode');
     const seed = urlParams.get('seed');
     const targetScoreStr = urlParams.get('target');
-    
+    const parsedTarget = targetScoreStr ? parseInt(targetScoreStr, 10) : NaN;
+    const targetScore = Number.isFinite(parsedTarget) ? parsedTarget : undefined;
+
     if (mode === 'challenge' && seed) {
-      this.scene.start('Game', { mode: 'challenge', challengeSeed: seed, targetScore: targetScoreStr ? parseInt(targetScoreStr, 10) : undefined });
+      this.scene.start('Game', { mode: 'challenge', challengeSeed: seed, targetScore });
     } else {
       this.scene.start('Menu');
     }

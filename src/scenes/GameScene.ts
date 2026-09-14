@@ -262,6 +262,22 @@ export class GameScene extends Phaser.Scene {
     this.rng = createSeededRNG(this.challengeSeed);
   }
 
+  /** Phaser doesn't carry init() data forward across scene.restart() on its own — an
+   * argument-less restart (or one that only re-passes `mode`) silently dropped a Challenge run's
+   * seed/target, falling back to init()'s own fresh-Date.now()-seed default and no target at all:
+   * "retry" quietly turned into "play someone else's challenge from scratch as a normal run."
+   * Only Challenge mode's seed/target need to survive a restart on purpose — Daily always
+   * re-derives its own seed from today's date regardless (see init()), and Normal/Zen restarting
+   * into a *fresh* board rather than replaying the exact one you just quit is the behavior players
+   * already expect from "restart." Both restart call sites (Pause's Restart button, Game Over's
+   * tap-to-retry) build their data from this so neither can drift out of sync with the other. */
+  private restartData(): { mode: GameMode; challengeSeed?: string; targetScore?: number } {
+    if (this.mode !== 'challenge') {
+      return { mode: this.mode };
+    }
+    return { mode: this.mode, challengeSeed: this.challengeSeed, targetScore: this.targetScore };
+  }
+
   /** Routes every screen shake through the reduced-motion check in one place, rather than
    * repeating `if (this.prefersReducedMotion) return;` at each of the 5 call sites. */
   private shakeCamera(duration: number, intensity: number) {
@@ -374,6 +390,7 @@ export class GameScene extends Phaser.Scene {
     // Stats section of the panel (yellow, per the sketch): Score (left) / Best (right), plus the
     // Purr Meter bar. No next-cat preview here — the hovering drop cat in the arena already
     // shows exactly what's about to fall, so a second "next" box was redundant. One compact line
+    // per side instead of a label-over-number card — the arena gets the vertical space back.
     const statsTop = PANEL_TOP + 9;
 
     this.scoreValueText = this.add.text(PANEL_LEFT + 10, statsTop, 'SCORE 0', {
@@ -1141,7 +1158,7 @@ export class GameScene extends Phaser.Scene {
       minWidth: 220,
       onTap: () => {
         this.closePause();
-        this.scene.restart({ mode: this.mode });
+        this.scene.restart(this.restartData());
       },
     });
     const menu = createButton(this, centerX, centerY + 125, '🏠  Menu', THEME.calm, {
@@ -2573,10 +2590,10 @@ export class GameScene extends Phaser.Scene {
       // just chosen to leave it, rather than mid-drop or before they've even seen their score.
       // No-ops entirely on web / with ads removed — see MonetizationSystem.adsDisabled.
       await monetization.showInterstitial();
-      // Explicit mode, not a bare restart() — Phaser doesn't carry init() data forward on its
-      // own, so an argument-less restart from a Daily Challenge run would silently drop the
-      // player back into Normal mode instead of letting them retry the same challenge.
-      this.scene.restart({ mode: this.mode });
+      // restartData(), not a bare { mode } — see its own doc comment; a Challenge run's seed and
+      // target have to survive this restart on purpose, or "retry" quietly becomes "play a
+      // stranger's random run instead of the friend's challenge you were actually retrying."
+      this.scene.restart(this.restartData());
     });
   }
 

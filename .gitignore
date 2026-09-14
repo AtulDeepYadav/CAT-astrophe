@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Python (asset-generation scripts under assets-source/)
+__pycache__/
+*.pyc
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

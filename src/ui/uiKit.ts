@@ -134,8 +134,22 @@ export function createButton(
   // it exactly once (top-level call sites must call `scene.add.existing(container)` themselves).
   const container = new Phaser.GameObjects.Container(scene, x, y, children);
   container.setSize(w, h);
-  
-  // See previous comments for why hitArea is (0, 0, w, h)
+  // Rectangle(0, 0, w, h) — NOT a centered (-w/2, -h/2, w, h) rect, even though the button's
+  // children are drawn centered on (0,0). Phaser's InputManager.pointWithinHitArea() *always*
+  // adds the Container's displayOriginX/Y (= width/2, height/2 for a Container — see Container.js)
+  // to the pointer's local coordinate before testing it against hitArea, for every Container
+  // regardless of what hitArea it was given. A hitArea already centered on (0,0) then gets that
+  // same half-width/half-height added again, shifting the *actual* clickable region a full half a
+  // button-width up-and-left of the visible button — e.g. only its left half was clickable, with
+  // the right half dead and a phantom clickable strip extending into the empty space beyond the
+  // button's left edge. (0, 0, w, h) is the offset this addition is designed for — it's also
+  // exactly what Container.setSize() alone would generate as the *default* hit area with no
+  // explicit hitArea at all. Confirmed by reading InputManager.js's pointWithinHitArea and by a
+  // live real-click test that landed 0.47px outside the old rect's boundary, matching the math
+  // exactly. This one-line rectangle origin was the entire cause of "only the text is clickable" —
+  // the label sits at local (0,0), the one point the old, wrongly-shifted rect's corner still
+  // covered. DO NOT "simplify" this back to a centered rect — it looks more correct at a glance
+  // and silently reintroduces that exact bug.
   container.setInteractive({
     hitArea: new Phaser.Geom.Rectangle(0, 0, w, h),
     hitAreaCallback: Phaser.Geom.Rectangle.Contains,
@@ -174,6 +188,8 @@ export function createButton(
       shadow.fillStyle(0x1a0f06, 0.25);
       shadow.fillRoundedRect(-newW / 2, -h / 2 + 5, newW, h, radius);
       container.setSize(newW, h);
+      // Keep the hitArea in the same (0, 0, w, h) space as the constructor's — see the
+      // setInteractive() call above for why that's the correct rect, not a centered one.
       (container.input!.hitArea as Phaser.Geom.Rectangle).setTo(0, 0, newW, h);
     }
   };
@@ -461,27 +477,5 @@ export function bodyTextStyle(overrides: Partial<Phaser.Types.GameObjects.Text.T
     color: '#f7ecd9',
     ...overrides,
   };
-}
-
-/**
- * Captures a high-quality screenshot of the current Phaser canvas.
- * Returns a File object that can be passed directly to the native Web Share API.
- */
-export async function captureBoardStateAsImage(scene: Phaser.Scene): Promise<File | null> {
-  return new Promise((resolve) => {
-    scene.game.renderer.snapshot((image: Phaser.Display.Color | HTMLImageElement) => {
-      if (image instanceof HTMLImageElement) {
-        // Convert the base64 data URL to a Blob/File
-        fetch(image.src)
-          .then((res) => res.blob())
-          .then((blob) => {
-            resolve(new File([blob], 'cat-kingdom-score.png', { type: 'image/png' }));
-          })
-          .catch(() => resolve(null));
-      } else {
-        resolve(null);
-      }
-    });
-  });
 }
 
