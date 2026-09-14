@@ -13,6 +13,8 @@ import { BG_FRAME_COUNT, WORLD_ZONES, backgroundFrameTextureKey } from '../confi
 import { animFrameTextureKey, framesForLevel } from '../config/catAnimations';
 import { AMBIENT_MUSIC_KEY } from '../systems/MusicSystem';
 import { monetization } from '../systems/MonetizationSystem';
+import { CosmeticsSystem } from '../systems/CosmeticsSystem';
+import { loadTheme } from '../systems/ThemeLoader';
 
 const GLOW_TEXTURE_SIZE = 160;
 
@@ -88,6 +90,17 @@ export class BootScene extends Phaser.Scene {
     }
 
     this.buildGoldenGlowTexture();
+
+    // A theme equipped in a previous session (persisted by CosmeticsSystem) has to have its art
+    // actually in THIS session's texture manager before anything reads textureKeyForLevel(...,
+    // theme) — the manager is rebuilt from scratch on every page load, so a stale reference to an
+    // unloaded theme would otherwise show Phaser's missing-texture placeholder everywhere that
+    // theme's cats appear. Only the one equipped theme loads here (never every theme, see
+    // ThemeLoader's own doc comment for the budget reasoning) and it's a no-op entirely for the
+    // (default, and by far most common) case of no theme equipped.
+    const equippedTheme = new CosmeticsSystem().getSelectedThemeId();
+    await loadTheme(this, equippedTheme);
+
     // Fire-and-forget: on web this resolves instantly (a no-op), and on Android it brings up the
     // AdMob/RevenueCat SDKs and preloads the first rewarded ad in the background. Nothing here
     // gates the menu on it — a slow ad-network response should never delay getting into the game.
