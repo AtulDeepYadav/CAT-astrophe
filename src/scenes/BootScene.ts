@@ -18,6 +18,21 @@ import { loadTheme } from '../systems/ThemeLoader';
 
 const GLOW_TEXTURE_SIZE = 160;
 
+/** Rotate through these while the ~90-file preload runs — genuinely accurate mechanics tips
+ * (checked against the actual code, not vibes), not filler. A loading screen with real content
+ * teaches a first-time player something before they've even seen the board, and gives repeat
+ * players a reason to actually read it instead of tapping past. */
+const LOADING_TIPS: string[] = [
+  '🌪️ Merging into a Tiger or a Celestial Cat clears the small cats crowding your board.',
+  '✨ Two Golden Cats merge for double points — and a bonus size jump.',
+  '💖 Fill the Purr Meter for a free Yarn Ball power-up.',
+  '🔗 Merge fast for a combo chain — the quicker the chain, the bigger the score bonus.',
+  '😿 Board getting crowded? A revive costs 🐟 30 Fish, or watch a quick ad instead.',
+  '🎯 Challenge a Friend from Game Over — they get your exact board and try to beat your score.',
+  '🌙 Zen Mode never ends — no danger line, no game over, just a calm board to play with.',
+  '📅 The Daily Challenge changes every day, with its own twist on the rules.',
+];
+
 /**
  * Loads the real cat portraits (cropped from the character sheet in assets-source/,
  * see public/assets/sprites/cats/) — the placeholder-generated circles from earlier
@@ -27,6 +42,9 @@ const GLOW_TEXTURE_SIZE = 160;
 export class BootScene extends Phaser.Scene {
   private loadingBarBg!: Phaser.GameObjects.Rectangle;
   private loadingBarFill!: Phaser.GameObjects.Rectangle;
+  private tipText!: Phaser.GameObjects.Text;
+  private tipTimer!: Phaser.Time.TimerEvent;
+  private tipIndex = 0;
   /** Keys of any files the loader couldn't fetch (dropped connection mid-load, a 404, etc.) —
    * checked once loading finishes so a partial failure shows a real retry screen instead of
    * silently limping into the menu with missing textures/audio. */
@@ -81,8 +99,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   async create() {
-    this.loadingBarBg.destroy();
-    this.loadingBarFill.destroy();
+    this.destroyLoadingUI();
 
     if (this.failedFileKeys.length > 0) {
       this.showLoadErrorScreen();
@@ -217,5 +234,33 @@ export class BootScene extends Phaser.Scene {
     this.loadingBarFill = this.add
       .rectangle(GAME_WIDTH / 2 - 100, GAME_HEIGHT / 2, 0, 10, 0xff8fb3, 1)
       .setOrigin(0, 0.5);
+
+    // Starts on a random tip (not always index 0) so a quick dev-reload or a fast connection that
+    // never gets to rotate doesn't always show the same one first.
+    this.tipIndex = Math.floor(Math.random() * LOADING_TIPS.length);
+    this.tipText = this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 40, LOADING_TIPS[this.tipIndex], {
+        fontFamily: FONT_FAMILY,
+        fontSize: '13px',
+        color: '#6f6152',
+        align: 'center',
+        wordWrap: { width: GAME_WIDTH - 60 },
+      })
+      .setOrigin(0.5, 0);
+    this.tipTimer = this.time.addEvent({
+      delay: 2600,
+      loop: true,
+      callback: () => {
+        this.tipIndex = (this.tipIndex + 1) % LOADING_TIPS.length;
+        this.tipText.setText(LOADING_TIPS[this.tipIndex]);
+      },
+    });
+  }
+
+  private destroyLoadingUI() {
+    this.loadingBarBg.destroy();
+    this.loadingBarFill.destroy();
+    this.tipText.destroy();
+    this.tipTimer.destroy();
   }
 }
