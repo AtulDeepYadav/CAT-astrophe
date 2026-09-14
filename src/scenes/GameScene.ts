@@ -2199,8 +2199,10 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    // Hidden by default — triggerGameOver() shows it only when this run matched or beat the
-    // persisted best, and it's the thing playBirthBounce-style entrance tweens below fire for.
+    // Hidden by default — finalizeGameOver() shows it only when this run matched or beat the
+    // persisted best (or, in Challenge mode, beat the friend's target score), and it's the thing
+    // playBirthBounce-style entrance tweens below fire for. Text itself is swapped at show-time
+    // between the two wordings — see finalizeGameOver.
     this.newBestBanner = this.add
       .text(centerX, centerY - 215, '🎉 NEW BEST! 🎉', {
         fontFamily: FONT_FAMILY,
@@ -2519,7 +2521,13 @@ export class GameScene extends Phaser.Scene {
     // one — by now the two being equal (and non-zero) IS the "new best" signal, no separate flag
     // to track through the whole run.
     const isNewBest = this.score.score > 0 && this.score.score >= this.score.best;
-    this.vibrate(isNewBest ? [40, 40, 40, 40, 120] : [60, 50, 100]); // a brighter pattern for a new best, distinct from the plain falling one
+    // Score only ever goes up (points are added on merge, never subtracted), so "final score" and
+    // "did it ever reach the target" are the same check — no need to have watched for the crossing
+    // moment mid-run.
+    const challengeWon = this.mode === 'challenge' && this.targetScore !== undefined && this.score.score >= this.targetScore;
+    this.vibrate(
+      isNewBest || challengeWon ? [40, 40, 40, 40, 120] : [60, 50, 100],
+    ); // a brighter pattern for a new best (or a beaten challenge), distinct from the plain falling one
 
     // Zen Mode has no fail state, so triggerGameOver is never called for it in the first place —
     // every run that gets here is a normal or daily attempt, both fair game for the leaderboard.
@@ -2532,12 +2540,19 @@ export class GameScene extends Phaser.Scene {
 
     // At most one bonus line — the game-over overlay only has so much vertical room before
     // running into the restart hint/share button below it, and a leaderboard rank plus a daily
-    // result together would be two. The daily result is the more specific, mode-relevant one
-    // when both would otherwise apply.
+    // (or challenge) result together would be two. Whichever mode this run actually was is always
+    // the more specific, relevant line when more than one would otherwise apply.
     let bonusLine = '';
     if (this.mode === 'daily') {
       const isNewDailyBest = this.dailyChallenge.recordResult(this.score.score);
       bonusLine = isNewDailyBest ? "New best for today's challenge!" : `Today's best: ${this.dailyChallenge.bestScoreToday}`;
+    } else if (this.mode === 'challenge' && this.targetScore !== undefined) {
+      // No separate "you lost" banner/sound below for the miss case — same reasoning as
+      // Vaporize's consolation score elsewhere in this file: telling the player exactly how close
+      // they got invites a retry, a flat "you lost" just invites closing the tab.
+      bonusLine = challengeWon
+        ? `🏆 Challenge beaten! (target ${this.targetScore})`
+        : `Missed the target by ${this.targetScore - this.score.score} — give it another shot!`;
     } else if (rank) {
       bonusLine = `#${rank} on the leaderboard!`;
     }
@@ -2545,7 +2560,19 @@ export class GameScene extends Phaser.Scene {
     this.finalScoreText.setText(bonusLine ? `${summary}\n${bonusLine}` : summary);
     this.gameOverContainer.setVisible(true);
     setContainerInteractive(this.gameOverContainer, true);
-    this.newBestBanner.setVisible(isNewBest).setScale(0.6).setAlpha(0);
+    // Named distinctly from the unrelated showCelebrationBanner() *method* above (the generic
+    // eyebrow+title achievement-toast used for discoveries elsewhere in this file) — this is
+    // purely about whether to reveal newBestBanner below, nothing to do with that other mechanism.
+    // A Challenge run always gets the Challenge-specific wording when it won, even if this score
+    // also happens to be a new personal best — you're here because of the friend's target, and
+    // "NEW BEST" would be actively wrong/confusing if you beat the target without also beating
+    // your own best (two independent numbers). Every other case keeps the existing wording.
+    const revealBanner = isNewBest || challengeWon;
+    this.newBestBanner
+      .setText(this.mode === 'challenge' && challengeWon ? '🏆 CHALLENGE BEATEN! 🏆' : '🎉 NEW BEST! 🎉')
+      .setVisible(revealBanner)
+      .setScale(0.6)
+      .setAlpha(0);
 
     // The big portrait (see portraitTextureKeyForLevel) pops in with a bounce rather than just
     // appearing — this is the one screen in the whole app where a cat's art is the actual point,
@@ -2572,7 +2599,7 @@ export class GameScene extends Phaser.Scene {
       delay: 120,
       ease: 'Back.easeOut',
       onComplete: () => {
-        if (isNewBest) {
+        if (revealBanner) {
           this.tweens.add({
             targets: this.newBestBanner,
             scale: 1,
