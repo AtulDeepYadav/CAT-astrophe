@@ -85,6 +85,21 @@ const CELESTIAL_DISCOVERY_BONUS = 500;
 const NEW_SPECIES_BONUS = 100;
 /** Accent color for achievement-unlock banners — distinct from the cat-discovery gold. */
 const ACHIEVEMENT_ACCENT = 0x8ec6ff;
+/**
+ * The "Vaporize" mechanic — merging up to one of these levels unleashes a shockwave that clears
+ * every cat at this level's own value and below, so a Kitten never spends the rest of a run
+ * permanently buried under a Tiger. Deliberately just these two rare, high-ceiling moments
+ * (Tiger, Celestial Cat) rather than the wider "every Big Cat merge" version floated originally —
+ * that constant version breaks the genre's one rule (nothing disappears except by merging) often
+ * enough to undercut the danger-line's whole pile-management tension. Two lifetime-rare triggers
+ * keep it a payoff for reaching the run's two biggest milestones instead of a standing safety net.
+ * Value = the highest level cleared (so level 9 -> clears 1-2, matching the original N-7 pitch;
+ * level 13 -> clears 1-6).
+ */
+const VAPORIZE_TRIGGERS: Record<number, number> = { 9: 2, 13: 6 };
+/** How long physics pauses for the shockwave to visually sweep through before cats are cleared —
+ * long enough to read as a beat, short enough not to feel like the game hung. */
+const VAPORIZE_FREEZE_MS = 500;
 /** Shared between buildCatsTab (layout) and openCollectionBook (re-scaling on open) so they can't drift apart. */
 const COLLECTION_CELL_IMAGE_HEIGHT = 50;
 /** Flavor text for the once-per-run "you've reached a new area" banner — home has none, it's the starting zone. */
@@ -462,6 +477,13 @@ export class GameScene extends Phaser.Scene {
           } else {
             this.showDiscoveryBanner(newLevel);
           }
+        }
+
+        // Independent of the discovery cinematics above (which are one-time-ever unlocks) — this
+        // fires on *every* run that merges up to level 9 or 13, not just the first.
+        const vaporizeThreshold = VAPORIZE_TRIGGERS[newLevel];
+        if (vaporizeThreshold !== undefined) {
+          this.triggerVaporize(vaporizeThreshold, x, y);
         }
       },
       onHardImpact: (catA, catB) => {
@@ -2541,5 +2563,81 @@ export class GameScene extends Phaser.Scene {
         onComplete: () => spark.destroy(),
       });
     }
+  }
+
+  /**
+   * The "Vaporize" milestone reaction (see VAPORIZE_TRIGGERS) — briefly freezes physics, sweeps an
+   * expanding shockwave ring out from the triggering merge, and clears every cat at
+   * `maxLevelCleared` or below once the ring reaches it. Quietly no-ops if the board doesn't
+   * actually have any cat that low right now — a roar and a flash for clearing nothing would read
+   * as a bug, not an event.
+   */
+  private triggerVaporize(maxLevelCleared: number, originX: number, originY: number) {
+    const targets: Cat[] = [];
+    for (const body of this.matter.world.getAllBodies()) {
+      const cat = body.gameObject;
+      if (cat instanceof Cat && cat.level <= maxLevelCleared) {
+        targets.push(cat);
+      }
+    }
+    if (targets.length === 0) {
+      return;
+    }
+
+    this.audio.playLionRoar();
+    this.shakeCamera(300, 0.012);
+    this.vibrate([30, 40, 60]);
+    // Physics pauses for the beat (Scene tweens — the ring, the puffs — aren't gated by this and
+    // keep animating), then resumes once every target has been swept and destroyed.
+    this.matter.world.pause();
+
+    const maxDistance = Math.max(...targets.map((cat) => Phaser.Math.Distance.Between(originX, originY, cat.x, cat.y)));
+
+    const ring = this.add.circle(originX, originY, 4, 0xfff066, 0).setDepth(950);
+    ring.setStrokeStyle(5, 0xfff066, 0.9);
+    this.tweens.add({
+      targets: ring,
+      radius: maxDistance * 1.15,
+      alpha: 0,
+      duration: VAPORIZE_FREEZE_MS,
+      ease: 'Cubic.easeOut',
+      onComplete: () => ring.destroy(),
+    });
+
+    for (const cat of targets) {
+      const distance = Phaser.Math.Distance.Between(originX, originY, cat.x, cat.y);
+      // Staggered by how far the ring has to travel to reach it, so the clear reads as a wave
+      // sweeping across the board rather than every low-tier cat popping at once.
+      const delay = maxDistance > 0 ? (distance / maxDistance) * VAPORIZE_FREEZE_MS * 0.8 : 0;
+      // Consolation credit, not a full merge payout — this cat never got to actually merge up
+      // itself, but deleting it for zero return would read as the game taking progress away
+      // rather than clearing clutter. Deliberately not run through ComboSystem: this is a
+      // cleanup, not a skillful chain the player pulled off.
+      const consolation = getCatData(cat.level).points;
+      this.time.delayedCall(delay, () => {
+        if (!cat.active) {
+          return; // could already be gone — destroyed by something else in the same frozen beat
+        }
+        this.score.add(consolation);
+        this.refreshScoreText();
+        this.spawnVaporizePuff(cat.x, cat.y);
+        cat.destroy();
+      });
+    }
+
+    this.time.delayedCall(VAPORIZE_FREEZE_MS, () => this.matter.world.resume());
+  }
+
+  /** A soft, fading puff — reads as "gone", not "leveled up" (contrast with showMergeBurst's crisp ring). */
+  private spawnVaporizePuff(x: number, y: number) {
+    const puff = this.add.circle(x, y, 10, 0xffffff, 0.8).setDepth(951);
+    this.tweens.add({
+      targets: puff,
+      radius: 34,
+      alpha: 0,
+      duration: 260,
+      ease: 'Cubic.easeOut',
+      onComplete: () => puff.destroy(),
+    });
   }
 }
