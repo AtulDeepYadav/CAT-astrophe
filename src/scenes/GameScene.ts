@@ -121,6 +121,10 @@ export class GameScene extends Phaser.Scene {
   private dropLevel = 1;
   private dropIsGolden = false;
   private highestLevelThisRun = 1;
+  // True from the moment score first crosses targetScore this run, in Challenge mode — drives
+  // both the live crossing celebration (fires once, in the onMerge handler) and the HUD's
+  // ✅/🎯 state, and finalizeGameOver reads this instead of recomputing the same comparison.
+  private challengeBeatenThisRun = false;
 
   // Two stacked layers crossfaded against each other rather than one Image with setTexture() —
   // a hard cut between two frames that only differ by a sliver (a leaf drifting, a bird's wing)
@@ -200,6 +204,10 @@ export class GameScene extends Phaser.Scene {
   private reviveWithAdButton!: Phaser.GameObjects.Container;
   private reviveDeclineButton!: Phaser.GameObjects.Text;
   private reviveOfferCenterY = 0;
+  private doubleFishButton!: { container: Phaser.GameObjects.Container; text: Phaser.GameObjects.Text; setLabel: (s: string) => void };
+  // Bridges the per-call fishEarned value from finalizeGameOver() into the button's tap-time
+  // closure (built once, at scene construction, so it can't close over a stale per-run local).
+  private pendingDoubleFishAmount = 0;
   // One revive offer per run, spent or declined — see triggerGameOver/showReviveOffer.
   private hasUsedRevive = false;
   private purrBarFill!: Phaser.GameObjects.Graphics;
@@ -310,6 +318,7 @@ export class GameScene extends Phaser.Scene {
     this.combo = new ComboSystem();
     this.purrMeter = new PurrMeterSystem();
     this.highestLevelThisRun = 1;
+    this.challengeBeatenThisRun = false;
     this.currentZoneKey = zoneForLevel(1).key;
     this.isGameOver = false;
     this.canDrop = true;
@@ -400,14 +409,17 @@ export class GameScene extends Phaser.Scene {
       color: '#3a2b22',
     });
 
+    // Text/color set for real by refreshTargetHud() right below — see its own doc comment for why
+    // it's the single source of truth for this label instead of duplicating the ternary here.
     this.bestValueText = this.add
-      .text(PANEL_RIGHT - 10, statsTop, this.targetScore ? `🎯 TARGET ${this.targetScore}` : `BEST ${this.score.best}`, {
+      .text(PANEL_RIGHT - 10, statsTop, '', {
         fontFamily: UI_FONT_FAMILY,
         fontSize: '16px',
         fontStyle: '800',
-        color: this.targetScore ? '#b84a26' : '#3a2b22',
+        color: '#3a2b22',
       })
       .setOrigin(1, 0);
+    this.refreshTargetHud();
 
     this.buildPurrBar(statsTop + 22);
 
@@ -469,6 +481,21 @@ export class GameScene extends Phaser.Scene {
 
         this.score.add(points);
         this.refreshScoreText();
+        // The live "beat the friend's target" moment — fires once, the instant score first
+        // crosses it (score only ever goes up, so this can never re-fire this run). Reuses
+        // spawnCelebrationBurst (normally reserved for the game-over screen's new-best reveal)
+        // right at the triggering merge instead of a new effect.
+        if (
+          this.mode === 'challenge' &&
+          this.targetScore !== undefined &&
+          !this.challengeBeatenThisRun &&
+          this.score.score >= this.targetScore
+        ) {
+          this.challengeBeatenThisRun = true;
+          this.showToast(`🎯 Target beaten! (${this.targetScore})`);
+          this.spawnCelebrationBurst(x, y);
+          this.refreshTargetHud();
+        }
         this.audio.playMergeTone(newLevel);
         // Scales with combo the same way the popup's screen shake does — a short tap for a
         // single merge, a longer double-buzz once a real chain is going.
@@ -889,7 +916,21 @@ export class GameScene extends Phaser.Scene {
 
   private refreshScoreText() {
     this.scoreValueText.setText(`SCORE ${this.score.score}`);
-    this.bestValueText.setText(`BEST ${this.score.best}`);
+    this.refreshTargetHud();
+  }
+
+  /** The HUD's right-side value: the friend's target in Challenge mode (🎯 not yet crossed, ✅
+   * once challengeBeatenThisRun flips), or the plain personal best otherwise. Single source of
+   * truth for bestValueText's text+color — called from refreshScoreText (every merge) so the two
+   * states can never drift, and once more the moment challengeBeatenThisRun itself flips. */
+  private refreshTargetHud() {
+    if (this.targetScore === undefined) {
+      this.bestValueText.setText(`BEST ${this.score.best}`);
+      this.bestValueText.setColor('#3a2b22');
+      return;
+    }
+    this.bestValueText.setText(`${this.challengeBeatenThisRun ? '✅' : '🎯'} TARGET ${this.targetScore}`);
+    this.bestValueText.setColor(this.challengeBeatenThisRun ? '#5a9c3f' : '#b84a26');
   }
 
   /** Syncs the hovering arena preview to `dropLevel`/`dropIsGolden` — the cat about to be dropped. */
@@ -2188,7 +2229,9 @@ export class GameScene extends Phaser.Scene {
     const centerX = GAME_WIDTH / 2;
     const centerY = GAME_HEIGHT / 2;
     const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.65).setOrigin(0, 0);
-    const panel = createPanel(this, centerX, centerY, 360, 660, { radius: 30, fill: 0x241a12, fillAlpha: 0.65 });
+    // Taller than the original 660 — there's now a Double Fish row between the score and the
+    // restart hint (see finalizeGameOver/acceptDoubleFishViaAd).
+    const panel = createPanel(this, centerX, centerY, 360, 720, { radius: 30, fill: 0x241a12, fillAlpha: 0.65 });
 
     const title = this.add
       .text(centerX, centerY - 260, 'CAT-ASTROPHE!', {
@@ -2238,15 +2281,26 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    // Hidden by default, shown by finalizeGameOver() only when this run actually earned Fish and
+    // a rewarded ad is available — see acceptDoubleFishViaAd. Same THEME.info + 'play' icon as
+    // the revive offer's ad button, so "tap for a rewarded ad" reads as one visual language.
+    this.doubleFishButton = createButton(this, centerX, centerY + 178, '', THEME.info, {
+      fontSize: 16,
+      minWidth: 220,
+      icon: 'play',
+      onTap: () => this.acceptDoubleFishViaAd(),
+    });
+    this.doubleFishButton.container.setVisible(false);
+
     const restartHint = this.add
-      .text(centerX, centerY + 205, 'Tap to try again', {
+      .text(centerX, centerY + 228, 'Tap to try again', {
         fontFamily: FONT_FAMILY,
         fontSize: '18px',
         color: '#f7ecd9',
       })
       .setOrigin(0.5);
 
-    const shareButton = createButton(this, centerX, centerY + 250, 'Challenge a Friend', THEME.primary, {
+    const shareButton = createButton(this, centerX, centerY + 273, 'Challenge a Friend', THEME.primary, {
       fontSize: 17,
       minWidth: 200,
       icon: 'trophy',
@@ -2259,7 +2313,7 @@ export class GameScene extends Phaser.Scene {
     // logo would be more work to hand-draw and less recognizable than the platform's own glyph)
     // but given the same glass-circle treatment as every other icon in the app instead of a flat
     // rectangle chip.
-    const socialRow = this.add.container(centerX, centerY + 300);
+    const socialRow = this.add.container(centerX, centerY + 320);
     const socialButtons: { emoji: string; onTap: () => void }[] = [
       { emoji: '💬', onTap: () => openWhatsAppShare(this.shareContent()) },
       { emoji: '🐦', onTap: () => openTwitterShare(this.shareContent()) },
@@ -2298,6 +2352,7 @@ export class GameScene extends Phaser.Scene {
       this.finalCatGlow,
       this.finalCatPortrait,
       this.finalScoreText,
+      this.doubleFishButton.container,
       restartHint,
       shareButton.container,
       socialRow,
@@ -2466,6 +2521,21 @@ export class GameScene extends Phaser.Scene {
     this.performRevive();
   }
 
+  /** Game Over's "Double Fish" rewarded-ad path — mirrors acceptReviveViaAd's shape exactly. The
+   * button stays up (rather than hiding) if the ad failed to show, so a dropped/skipped ad reads
+   * as "try again", not "you missed your chance". */
+  private async acceptDoubleFishViaAd() {
+    const earned = await monetization.showRewardedAd();
+    if (!earned) {
+      this.showToast("Ad didn't finish — try again?");
+      return;
+    }
+    this.currency.add(this.pendingDoubleFishAmount);
+    this.showToast(`+${this.pendingDoubleFishAmount} 🐟 more!`);
+    this.doubleFishButton.container.setVisible(false);
+    setContainerInteractive(this.doubleFishButton.container, false);
+  }
+
   /** Clears the cats crowding the danger line so there's actually room to keep playing, and
    * resumes the run in place — same board, same score, just breathing room back. Shared by both
    * the Fish and rewarded-ad revive paths once each has separately confirmed payment. */
@@ -2515,6 +2585,15 @@ export class GameScene extends Phaser.Scene {
     if (fishEarned > 0) {
       this.currency.add(fishEarned);
     }
+
+    // Nothing to double when this run earned 0 Fish — matches the summary text below, which
+    // already omits the "+N earned" line in that case.
+    this.pendingDoubleFishAmount = fishEarned;
+    const canDoubleFish = fishEarned > 0 && monetization.canShowRewardedAd;
+    this.doubleFishButton.setLabel(`Double Fish (+${fishEarned})`);
+    this.doubleFishButton.container.setVisible(canDoubleFish);
+    setContainerInteractive(this.doubleFishButton.container, canDoubleFish);
+
     const summary =
       fishEarned > 0
         ? `You reached ${bestCat.name}!\nScore: ${this.score.score}\nBest: ${this.score.best}\n+${fishEarned} 🐟 earned`
@@ -2524,10 +2603,10 @@ export class GameScene extends Phaser.Scene {
     // one — by now the two being equal (and non-zero) IS the "new best" signal, no separate flag
     // to track through the whole run.
     const isNewBest = this.score.score > 0 && this.score.score >= this.score.best;
-    // Score only ever goes up (points are added on merge, never subtracted), so "final score" and
-    // "did it ever reach the target" are the same check — no need to have watched for the crossing
-    // moment mid-run.
-    const challengeWon = this.mode === 'challenge' && this.targetScore !== undefined && this.score.score >= this.targetScore;
+    // challengeBeatenThisRun is set the instant score first crosses targetScore (see onMerge) —
+    // score only ever goes up, so "crossed it at some point this run" and "final score >= target"
+    // are the same fact, no need to recompute the comparison here too.
+    const challengeWon = this.mode === 'challenge' && this.challengeBeatenThisRun;
     this.vibrate(
       isNewBest || challengeWon ? [40, 40, 40, 40, 120] : [60, 50, 100],
     ); // a brighter pattern for a new best (or a beaten challenge), distinct from the plain falling one
