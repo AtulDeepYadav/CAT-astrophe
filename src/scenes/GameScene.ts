@@ -42,6 +42,8 @@ import { IdleSystem } from '../systems/IdleSystem';
 import { CollectionSystem } from '../systems/CollectionSystem';
 import { StatsSystem } from '../systems/StatsSystem';
 import { ACHIEVEMENTS, AchievementSystem } from '../systems/AchievementSystem';
+import { QuestSystem } from '../systems/QuestSystem';
+import type { ActiveQuest } from '../systems/QuestSystem';
 import { COSMETIC_OPTIONS, CosmeticsSystem, THEME_OPTIONS } from '../systems/CosmeticsSystem';
 import { loadTheme } from '../systems/ThemeLoader';
 import type { DailyModifier } from '../config/dailyChallenges';
@@ -111,7 +113,7 @@ const ZONE_TRANSITION_TEXT: Partial<Record<WorldZoneKey, { emoji: string; title:
   savannah: { emoji: '👑', title: 'WHERE THE WILD KINGS ROAM' },
 };
 
-type CollectionBookTab = 'cats' | 'stats' | 'style';
+type CollectionBookTab = 'cats' | 'quests' | 'stats' | 'style';
 
 /**
  * Core loop: aim a hovering cat left/right, drop it, merge same-level pairs on contact,
@@ -156,6 +158,7 @@ export class GameScene extends Phaser.Scene {
     pillH: number;
   }[] = [];
   private catsTabContainer!: Phaser.GameObjects.Container;
+  private questsTabContainer!: Phaser.GameObjects.Container;
   private statsTabContainer!: Phaser.GameObjects.Container;
   private styleTabContainer!: Phaser.GameObjects.Container;
   private collectionCells: {
@@ -249,6 +252,7 @@ export class GameScene extends Phaser.Scene {
   private leaderboard!: LeaderboardSystem;
   private dailyChallenge!: DailyChallengeSystem;
   private currency!: CurrencySystem;
+  private quests!: QuestSystem;
 
   constructor() {
     super('Game');
@@ -312,6 +316,7 @@ export class GameScene extends Phaser.Scene {
     this.leaderboard = new LeaderboardSystem();
     this.dailyChallenge = new DailyChallengeSystem();
     this.currency = new CurrencySystem();
+    this.quests = new QuestSystem();
     this.hasUsedRevive = false;
     this.audio.setSfxMuted(this.settings.sfxMuted);
     ensureAmbientMusic(this, this.settings.musicMuted);
@@ -333,6 +338,7 @@ export class GameScene extends Phaser.Scene {
     // "undiscovered" despite being the first cat every player sees — count it as known from the start.
     this.collection.discover(1);
     this.stats.recordGameStarted();
+    this.handleQuestProgress(this.quests.recordGameStarted());
 
     // Inner play-area rect (CONTAINER_LEFT..CONTAINER_RIGHT, CONTAINER_TOP..CONTAINER_FLOOR) with
     // invisible walls of WALL_THICKNESS built inward from the panel's gray arena section (drawn in
@@ -507,14 +513,17 @@ export class GameScene extends Phaser.Scene {
         this.showMergeBurst(x, y, isGolden);
         this.highestLevelThisRun = Math.max(this.highestLevelThisRun, newLevel);
         this.updateWorldBackground(this.highestLevelThisRun, willDiscoverThisMerge);
+        this.handleQuestProgress(this.quests.recordLevelReached(newLevel));
 
         this.purrMeter.addProgress(GAIN_PER_MERGE * (this.modifier?.purrGainMultiplier ?? 1));
         this.refreshPurrBar();
 
         this.stats.recordMerge();
+        this.handleQuestProgress(this.quests.recordMerge());
         this.tryUnlockAchievement('first_merge');
         if (isGolden) {
           this.tryUnlockAchievement('first_golden');
+          this.handleQuestProgress(this.quests.recordGolden());
         }
         if (this.stats.get().totalCatsMerged >= 100) {
           this.tryUnlockAchievement('merged_100');
@@ -524,6 +533,7 @@ export class GameScene extends Phaser.Scene {
           this.showComboPopup(combo, x, y);
         }
         this.stats.recordCombo(combo);
+        this.handleQuestProgress(this.quests.recordCombo(combo));
         if (combo >= 5) {
           this.tryUnlockAchievement('combo_5');
         }
@@ -1355,10 +1365,11 @@ export class GameScene extends Phaser.Scene {
 
     const tabDefs: { key: CollectionBookTab; label: string }[] = [
       { key: 'cats', label: '🐱 Cats' },
+      { key: 'quests', label: '🎯 Quests' },
       { key: 'stats', label: '📊 Stats' },
       { key: 'style', label: '✨ Style' },
     ];
-    const tabX = [GAME_WIDTH * 0.18, GAME_WIDTH * 0.5, GAME_WIDTH * 0.82];
+    const tabX = [GAME_WIDTH * 0.13, GAME_WIDTH * 0.39, GAME_WIDTH * 0.64, GAME_WIDTH * 0.88];
     const tabChildren: Phaser.GameObjects.GameObject[] = [];
     this.collectionTabButtons = tabDefs.map((def, i) => {
       const text = this.add
@@ -1378,6 +1389,7 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.catsTabContainer = this.buildCatsTab();
+    this.questsTabContainer = this.buildQuestsTab();
     this.statsTabContainer = this.buildStatsTab();
     this.styleTabContainer = this.buildStyleTab();
 
@@ -1404,6 +1416,7 @@ export class GameScene extends Phaser.Scene {
       closeIcon.container,
       ...tabChildren,
       this.catsTabContainer,
+      this.questsTabContainer,
       this.statsTabContainer,
       this.styleTabContainer,
       closeHint,
@@ -1462,6 +1475,72 @@ export class GameScene extends Phaser.Scene {
       this.collectionCells.push({ level: cat.level, image, name, tier });
       children.push(image, name, tier);
     }
+
+    return this.add.container(0, 0, children);
+  }
+
+  /** Today's 3 quests (see QuestSystem — same content for the whole day, built once here; only
+   * the progress/completed line is refreshed live, in openCollectionBook()). Every quest's
+   * fulfillment path is identical in this game — there's no separate mini-activity per quest to
+   * route to, progress just happens from normal play — so rather than a per-row "Go!" button that
+   * would do the same thing three times over, there's one clear CTA at the bottom that closes the
+   * book and drops the player straight back into the board where all of them actually progress. */
+  private buildQuestsTab(): Phaser.GameObjects.Container {
+    const intro = this.add
+      .text(GAME_WIDTH / 2, 116, "Today's Quests — resets at midnight", {
+        fontFamily: UI_FONT_FAMILY,
+        fontSize: '14px',
+        color: '#c9bdae',
+      })
+      .setOrigin(0.5);
+
+    const children: Phaser.GameObjects.GameObject[] = [intro];
+    const todaysQuests = this.quests.getTodaysQuests();
+    const rowTop = 176;
+    const rowHeight = 116;
+
+    todaysQuests.forEach((quest, i) => {
+      const y = rowTop + i * rowHeight;
+
+      const rowCard = this.add.graphics();
+      rowCard.fillStyle(0xfff6e8, i % 2 === 0 ? 0.07 : 0.03);
+      rowCard.fillRoundedRect(20, y - 46, GAME_WIDTH - 40, 92, 16);
+      rowCard.setName(`quest-card-${quest.id}`);
+
+      const iconBg = this.add.circle(40, y - 10, 19, 0xfff6e8, 0.1);
+      const icon = this.add.text(40, y - 10, quest.icon, { fontSize: '20px' }).setOrigin(0.5);
+      const name = this.add
+        .text(68, y - 30, quest.name, {
+          fontFamily: UI_FONT_FAMILY,
+          fontSize: '16px',
+          color: '#fdf6ec',
+          fontStyle: 'bold',
+        })
+        .setOrigin(0, 0.5);
+      const desc = this.add
+        .text(68, y - 8, quest.description, {
+          fontFamily: UI_FONT_FAMILY,
+          fontSize: '12px',
+          color: '#c9bdae',
+        })
+        .setOrigin(0, 0.5);
+      const progress = this.add.text(68, y + 16, '', {
+        fontFamily: UI_FONT_FAMILY,
+        fontSize: '13px',
+        fontStyle: '700',
+        color: '#ffd873',
+      });
+      progress.setOrigin(0, 0.5);
+      progress.setName(`quest-progress-${quest.id}`);
+
+      children.push(rowCard, iconBg, icon, name, desc, progress);
+    });
+
+    const goButton = createButton(this, GAME_WIDTH / 2, rowTop + todaysQuests.length * rowHeight + 30, '▶  Let\'s Go!', THEME.primary, {
+      minWidth: 200,
+      onTap: () => this.closeCollectionBook(),
+    });
+    children.push(goButton.container);
 
     return this.add.container(0, 0, children);
   }
@@ -1675,6 +1754,17 @@ export class GameScene extends Phaser.Scene {
 
     this.refreshStyleTab();
 
+    for (const quest of this.quests.getTodaysQuests()) {
+      const progress = this.questsTabContainer.getByName(`quest-progress-${quest.id}`) as Phaser.GameObjects.Text | null;
+      if (quest.completed) {
+        progress?.setText(`✅ +${quest.rewardFish} 🐟 earned`);
+        progress?.setColor('#5a9c3f');
+      } else {
+        progress?.setText(`${quest.progress} / ${quest.target}`);
+        progress?.setColor('#ffd873');
+      }
+    }
+
     this.setCollectionBookTab('cats');
     this.collectionBookContainer.setVisible(true);
     setContainerInteractive(this.collectionBookContainer, true);
@@ -1694,6 +1784,7 @@ export class GameScene extends Phaser.Scene {
   private setCollectionBookTab(tab: CollectionBookTab) {
     this.collectionBookTab = tab;
     this.catsTabContainer.setVisible(tab === 'cats');
+    this.questsTabContainer.setVisible(tab === 'quests');
     this.statsTabContainer.setVisible(tab === 'stats');
     this.styleTabContainer.setVisible(tab === 'style');
     for (const button of this.collectionTabButtons) {
@@ -1868,6 +1959,20 @@ export class GameScene extends Phaser.Scene {
       this.showAchievementBanner(id);
       this.vibrate([20, 40, 20, 40, 60]);
     }
+  }
+
+  /** Every quests.recordX() call funnels through here — grants the Fish and celebrates the
+   * instant a quest's progress first crosses its target (QuestSystem itself only owns the
+   * progress data, never touches currency/UI). A no-op call site (recordX() returning null,
+   * the overwhelmingly common case — most merges don't complete anything) costs nothing more
+   * than the one null check. */
+  private handleQuestProgress(completed: ActiveQuest | null) {
+    if (!completed) {
+      return;
+    }
+    this.currency.add(completed.rewardFish);
+    this.showToast(`${completed.icon} Quest complete: ${completed.name}! +${completed.rewardFish} 🐟`);
+    this.vibrate([20, 40, 20, 40, 60]);
   }
 
   /** No-op on desktop/unsupported browsers (Vibration API is mobile-only) and silently swallows
@@ -2126,6 +2231,7 @@ export class GameScene extends Phaser.Scene {
     this.purrMeter.consume();
     this.refreshPurrBar();
     this.audio.playPowerUp();
+    this.handleQuestProgress(this.quests.recordYarnBall());
 
     // The meter filling and the tap that spends it were already clear, but the payout itself
     // (cats getting nudged toward center) is easy to miss mid-drop and gives no sense that
@@ -2925,6 +3031,7 @@ export class GameScene extends Phaser.Scene {
     if (targets.length === 0) {
       return;
     }
+    this.handleQuestProgress(this.quests.recordVaporize());
 
     this.audio.playLionRoar();
     this.shakeCamera(300, 0.012);
