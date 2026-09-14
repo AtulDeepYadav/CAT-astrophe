@@ -2312,9 +2312,12 @@ export class GameScene extends Phaser.Scene {
   private shareContent(): ShareContent {
     const bestCat = getCatData(this.highestLevelThisRun);
     
-    // Generate a fresh seed for the challenge so the friend gets a new deterministic board,
-    // not exactly the one we just played (unless we want them to play the same seed we did).
-    // Actually, playing the exact same seed is the fairest test of skill!
+    // Passing on this run's own seed (not a fresh one) is the whole point of a challenge link —
+    // the friend's spawn queue comes out in the exact same order ours did, a fair like-for-like
+    // comparison. It's not a literal replay, though: MATTER_CONFIG has no fixed physics timestep,
+    // so the *same* sequence of drops can still settle differently on their device's own frame
+    // timing — hence "same cats" below, not "exact board" (that was the original, overstated
+    // wording; softened once that gap was pointed out).
     const seed = this.challengeSeed ?? Date.now().toString();
     const url = new URL(window.location.href);
     url.searchParams.set('mode', 'challenge');
@@ -2323,7 +2326,7 @@ export class GameScene extends Phaser.Scene {
 
     return {
       title: 'Cat-astrophe Challenge',
-      text: `I reached ${bestCat.name} with a score of ${this.score.score} in Cat-astrophe! 🐱 Can you beat my exact board?`,
+      text: `I reached ${bestCat.name} with a score of ${this.score.score} in Cat-astrophe! 🐱 Same cats, can you beat my score?`,
       url: url.toString(),
     };
   }
