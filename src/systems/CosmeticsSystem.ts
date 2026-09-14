@@ -37,9 +37,7 @@ const DEFAULT_ID = COSMETIC_OPTIONS[0].id;
 
 /** A full art-reskin (Robot/Pirate/8-bit, etc.) — a second, independent cosmetic axis alongside
  * the golden-glow color above: owning a color implies nothing about which theme is equipped, or
- * vice versa. Empty until real theme art exists to fill it in (see ThemeLoader's own doc comment
- * for the loading side of this) — every player is effectively always on DEFAULT_THEME_ID until
- * then, and the Style tab's theme row simply renders nothing to pick from yet. */
+ * vice versa. See ThemeLoader's own doc comment for the loading side of this. */
 export interface ThemeOption {
   id: string;
   name: string;
@@ -52,7 +50,11 @@ export interface ThemeOption {
   unlockFish: number;
 }
 
-export const THEME_OPTIONS: ThemeOption[] = [];
+// 'robot' is a placeholder entry with no real art behind it yet — equipping it will fall back to
+// the default cat sprites everywhere (see ThemeLoader's per-file alias-on-404 behavior), so the
+// row is here purely to preview the Style tab's layout/unlock flow ahead of any actual theme art.
+// Swap in real entries (or add more) the moment art exists; nothing else needs to change.
+export const THEME_OPTIONS: ThemeOption[] = [{ id: 'robot', name: 'Robot Cats', icon: '🤖', unlockFish: 150 }];
 
 /**
  * Which golden-glow color the player has selected, persisted like the rest of the meta systems.
