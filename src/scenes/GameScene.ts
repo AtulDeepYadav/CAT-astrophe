@@ -2533,12 +2533,15 @@ export class GameScene extends Phaser.Scene {
     ); // a brighter pattern for a new best (or a beaten challenge), distinct from the plain falling one
 
     // Zen Mode has no fail state, so triggerGameOver is never called for it in the first place —
-    // every run that gets here is a normal or daily attempt, both fair game for the leaderboard.
+    // every run that gets here is Normal, Daily, or Challenge, all fair game for the leaderboard
+    // (Challenge reuses a borrowed spawn seed, but that seed is exactly as random as a freshly
+    // rolled one would have been — nothing about it makes the run easier or harder, so there's no
+    // real-fairness reason to exclude it, just an earlier mislabeling as plain "normal").
     const rank = this.leaderboard.submit({
       score: this.score.score,
       catName: bestCat.name,
       date: todayKey(),
-      mode: this.mode === 'daily' ? 'daily' : 'normal',
+      mode: this.mode === 'daily' || this.mode === 'challenge' ? this.mode : 'normal',
     });
 
     // At most one bonus line — the game-over overlay only has so much vertical room before

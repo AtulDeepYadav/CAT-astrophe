@@ -7,7 +7,7 @@ export interface LeaderboardEntry {
   catName: string;
   /** Device-local date string (see dailyChallenges.todayKey) the run was played on. */
   date: string;
-  mode: 'normal' | 'daily';
+  mode: 'normal' | 'daily' | 'challenge';
 }
 
 /**

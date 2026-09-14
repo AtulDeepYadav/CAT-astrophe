@@ -550,7 +550,7 @@ export class MenuScene extends Phaser.Scene {
             .setOrigin(0.5),
         );
 
-        const modeTag = entry.mode === 'daily' ? ' (daily)' : '';
+        const modeTag = entry.mode === 'daily' ? ' (daily)' : entry.mode === 'challenge' ? ' (challenge)' : '';
         rows.push(
           this.add
             .text(
@@ -581,7 +581,7 @@ export class MenuScene extends Phaser.Scene {
       return;
     }
     const best = entries[0];
-    const modeTag = best.mode === 'daily' ? ' (Daily Challenge)' : '';
+    const modeTag = best.mode === 'daily' ? ' (Daily Challenge)' : best.mode === 'challenge' ? ' (Friend Challenge)' : '';
     const result = await shareViaWebShare({
       title: 'Cat-astrophe',
       text: `My top run in Cat-astrophe: ${best.score} points as a ${best.catName}${modeTag}! 🐱 Can you beat me?`,
