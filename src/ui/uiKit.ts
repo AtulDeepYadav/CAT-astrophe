@@ -70,6 +70,8 @@ export interface ButtonOptions {
   radius?: number;
   depth?: number;
   onTap?: () => void;
+  /** Optional icon to draw next to the label, making this a dynamic image button */
+  icon?: IconName;
 }
 
 /**
@@ -99,7 +101,20 @@ export function createButton(
     .setOrigin(0.5)
     .setShadow(0, 2, 'rgba(0,0,0,0.18)', 0, false, true);
 
-  const w = Math.max(options.minWidth ?? 0, text.width + paddingX * 2);
+  let iconW = 0;
+  let iconGfx: Phaser.GameObjects.Graphics | null = null;
+  if (options.icon) {
+    iconW = fontSize * 1.2;
+    iconGfx = scene.add.graphics();
+    drawIcon(iconGfx, options.icon, iconW * 0.8, theme.textColor);
+    // Shift text to the right to make room for icon
+    text.setX(iconW * 0.6);
+    iconGfx.setX(-text.width / 2 - iconW * 0.2);
+    iconGfx.setY(1);
+  }
+
+  const contentW = text.width + (options.icon ? iconW + 4 : 0);
+  const w = Math.max(options.minWidth ?? 0, contentW + paddingX * 2);
   const h = text.height + paddingY * 2;
   const radius = Math.min(options.radius ?? 18, h / 2);
 
@@ -110,27 +125,17 @@ export function createButton(
   const bg = scene.add.graphics();
   drawButtonFace(bg, w, h, radius, theme);
 
+  const children: Phaser.GameObjects.GameObject[] = [shadow, bg, text];
+  if (iconGfx) children.push(iconGfx);
+
   // Not auto-added via scene.add.container() — every overlay in this app builds a button via
   // createButton() and then places the returned container as a child of its *own* outer container
   // (`this.add.container(0, 0, [..., button.container])`); callers are responsible for parenting
   // it exactly once (top-level call sites must call `scene.add.existing(container)` themselves).
-  const container = new Phaser.GameObjects.Container(scene, x, y, [shadow, bg, text]);
+  const container = new Phaser.GameObjects.Container(scene, x, y, children);
   container.setSize(w, h);
-  // Rectangle(0, 0, w, h) — NOT a centered (-w/2, -h/2, w, h) rect, even though the button's
-  // children are drawn centered on (0,0). Phaser's InputManager.pointWithinHitArea() *always*
-  // adds the Container's displayOriginX/Y (= width/2, height/2 for a Container — see Container.js)
-  // to the pointer's local coordinate before testing it against hitArea, for every Container
-  // regardless of what hitArea it was given. A hitArea already centered on (0,0) then gets that
-  // same half-width/half-height added again, shifting the *actual* clickable region a full half a
-  // button-width up-and-left of the visible button — e.g. only its left half was clickable, with
-  // the right half dead and a phantom clickable strip extending into the empty space beyond the
-  // button's left edge. (0, 0, w, h) is the offset this addition is designed for — it's also
-  // exactly what Container.setSize() alone would generate as the *default* hit area with no
-  // explicit hitArea at all. Confirmed by reading InputManager.js's pointWithinHitArea and by a
-  // live real-click test that landed 0.47px outside the old rect's boundary, matching the math
-  // exactly. This one-line rectangle origin was the entire cause of "only the text is clickable" —
-  // the label sits at local (0,0), the one point the old, wrongly-shifted rect's corner still
-  // covered.
+  
+  // See previous comments for why hitArea is (0, 0, w, h)
   container.setInteractive({
     hitArea: new Phaser.Geom.Rectangle(0, 0, w, h),
     hitAreaCallback: Phaser.Geom.Rectangle.Contains,
@@ -154,7 +159,14 @@ export function createButton(
 
   const setLabel = (next: string) => {
     text.setText(next);
-    const newW = Math.max(options.minWidth ?? 0, text.width + paddingX * 2);
+    const newContentW = text.width + (options.icon ? iconW + 4 : 0);
+    const newW = Math.max(options.minWidth ?? 0, newContentW + paddingX * 2);
+    
+    if (options.icon && iconGfx) {
+      text.setX(iconW * 0.6);
+      iconGfx.setX(-text.width / 2 - iconW * 0.2);
+    }
+
     if (Math.abs(newW - w) > 0.5) {
       bg.clear();
       drawButtonFace(bg, newW, h, radius, theme);
@@ -162,8 +174,6 @@ export function createButton(
       shadow.fillStyle(0x1a0f06, 0.25);
       shadow.fillRoundedRect(-newW / 2, -h / 2 + 5, newW, h, radius);
       container.setSize(newW, h);
-      // Keep the hitArea in the same (0, 0, w, h) space as the constructor's — see the
-      // setInteractive() call above for why that's the correct rect, not a centered one.
       (container.input!.hitArea as Phaser.Geom.Rectangle).setTo(0, 0, newW, h);
     }
   };
@@ -452,3 +462,26 @@ export function bodyTextStyle(overrides: Partial<Phaser.Types.GameObjects.Text.T
     ...overrides,
   };
 }
+
+/**
+ * Captures a high-quality screenshot of the current Phaser canvas.
+ * Returns a File object that can be passed directly to the native Web Share API.
+ */
+export async function captureBoardStateAsImage(scene: Phaser.Scene): Promise<File | null> {
+  return new Promise((resolve) => {
+    scene.game.renderer.snapshot((image: Phaser.Display.Color | HTMLImageElement) => {
+      if (image instanceof HTMLImageElement) {
+        // Convert the base64 data URL to a Blob/File
+        fetch(image.src)
+          .then((res) => res.blob())
+          .then((blob) => {
+            resolve(new File([blob], 'cat-kingdom-score.png', { type: 'image/png' }));
+          })
+          .catch(() => resolve(null));
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+

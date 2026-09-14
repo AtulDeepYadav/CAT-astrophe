@@ -53,20 +53,32 @@ FILES = {
 # row entirely, occasionally trimming a sliver of mane/ear/tail where the label plate sits close
 # enough to the hero that no rectangle gets both perfectly — always erring toward keeping the
 # whole face and body rather than the trimmed edge.
+#
+# x1 on levels 4, 6-13 was re-tightened after a stray fragment of each sheet's own top-right
+# corner flourish — a cursive "Same world. Bigger meows." tagline (and, on 11/12/13, a second
+# line like "Rare cats change the world.") that sits beside the sparkle-burst/heart decoration —
+# started bleeding into the exported portrait (visible on the Menu showcase and Game Over
+# screens). Re-measured directly against a pixel grid overlaid on each raw sheet in Cat Photos/:
+# where the tagline's leftmost letter sits to the right of the sparkle/heart decoration, x1 sits
+# between them, keeping the decoration; where they overlap in x (several do — the tagline often
+# starts at nearly the same x as the sparkle beside it, just higher up), x1 sits before both,
+# trading the decoration away since there's no single vertical cut that keeps one and drops the
+# other. Levels 1, 2, 3, 5 were already clear of this — their own tagline instance sits further
+# right than their (already tighter) label-plate-driven x1.
 HERO_ROI = {
     1: (305, 75, 1005, 705),
     2: (305, 0, 905, 580),
     3: (430, 0, 1105, 615),
-    4: (470, 0, 1254, 625),
+    4: (470, 0, 970, 625),
     5: (490, 0, 940, 615),
-    6: (490, 0, 980, 615),
-    7: (480, 0, 1040, 610),
-    8: (485, 0, 1120, 610),
-    9: (440, 0, 1170, 610),
-    10: (500, 0, 1160, 610),
-    11: (470, 0, 1160, 600),
-    12: (505, 0, 1170, 630),
-    13: (500, 0, 1254, 600),
+    6: (490, 0, 950, 615),
+    7: (480, 0, 940, 610),
+    8: (485, 0, 938, 610),
+    9: (440, 0, 958, 610),
+    10: (500, 0, 948, 610),
+    11: (470, 0, 930, 600),
+    12: (505, 0, 945, 630),
+    13: (500, 0, 945, 600),
 }
 
 MAX_DIM = 480

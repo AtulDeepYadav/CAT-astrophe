@@ -97,7 +97,18 @@ export class BootScene extends Phaser.Scene {
     // not just for one frame. Race against a timeout so a slow/unavailable font API can never
     // block the game from starting at all.
     await Promise.race([this.waitForFont(), new Promise((resolve) => this.time.delayedCall(2500, resolve))]);
-    this.scene.start('Menu');
+    
+    // Check for Challenge Deep Link
+    const urlParams = new URLSearchParams(window.location.search);
+    const mode = urlParams.get('mode');
+    const seed = urlParams.get('seed');
+    const targetScoreStr = urlParams.get('target');
+    
+    if (mode === 'challenge' && seed) {
+      this.scene.start('Game', { mode: 'challenge', challengeSeed: seed, targetScore: targetScoreStr ? parseInt(targetScoreStr, 10) : undefined });
+    } else {
+      this.scene.start('Menu');
+    }
   }
 
   /** A dropped connection partway through loading ~90 image/audio files used to just leave the

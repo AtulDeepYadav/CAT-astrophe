@@ -107,13 +107,14 @@ const SPAWN_WEIGHTS = [40, 30, 20, 10];
 
 /** Picks a spawnable level using SPAWN_WEIGHTS instead of a flat uniform chance. `overrideLevels`
  * (a Daily Challenge modifier's own pool) replaces SPAWNABLE_LEVELS entirely with equal odds
- * across the given levels instead of the normal Kitten-heavy weighting. */
-export function pickWeightedSpawnLevel(overrideLevels?: number[]): number {
+ * across the given levels instead of the normal Kitten-heavy weighting. Accepts an optional `rng`
+ * function (returning 0-1) for deterministic seeded gameplay (Daily/Challenge mode). */
+export function pickWeightedSpawnLevel(overrideLevels?: number[], rng: () => number = Math.random): number {
   if (overrideLevels && overrideLevels.length > 0) {
-    return overrideLevels[Math.floor(Math.random() * overrideLevels.length)];
+    return overrideLevels[Math.floor(rng() * overrideLevels.length)];
   }
   const total = SPAWN_WEIGHTS.reduce((sum, w) => sum + w, 0);
-  let roll = Math.random() * total;
+  let roll = rng() * total;
   for (let i = 0; i < SPAWNABLE_LEVELS.length; i++) {
     roll -= SPAWN_WEIGHTS[i];
     if (roll <= 0) {

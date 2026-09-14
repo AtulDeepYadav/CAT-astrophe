@@ -44,7 +44,7 @@ import { StatsSystem } from '../systems/StatsSystem';
 import { ACHIEVEMENTS, AchievementSystem } from '../systems/AchievementSystem';
 import { COSMETIC_OPTIONS, CosmeticsSystem } from '../systems/CosmeticsSystem';
 import type { DailyModifier } from '../config/dailyChallenges';
-import { todayKey, todaysModifier } from '../config/dailyChallenges';
+import { todayKey, todaysModifier, createSeededRNG } from '../config/dailyChallenges';
 import { LeaderboardSystem } from '../systems/LeaderboardSystem';
 import { DailyChallengeSystem } from '../systems/DailyChallengeSystem';
 import { SettingsSystem } from '../systems/SettingsSystem';
@@ -242,11 +242,24 @@ export class GameScene extends Phaser.Scene {
     super('Game');
   }
 
+  private challengeSeed?: string;
+  private targetScore?: number;
+  private rng: () => number = Math.random;
+
   /** Phaser calls this before create(), with whatever was passed to scene.start('Game', data). */
-  init(data: { mode?: GameMode }) {
+  init(data: { mode?: GameMode; challengeSeed?: string; targetScore?: number }) {
     this.mode = data.mode ?? 'normal';
     this.modifier = this.mode === 'daily' ? todaysModifier() : null;
     this.dangerLineY = DANGER_LINE_Y + (this.modifier?.dangerLineShiftPx ?? 0);
+    this.challengeSeed = data.challengeSeed;
+    this.targetScore = data.targetScore;
+
+    if (this.mode === 'daily') {
+      this.challengeSeed = todayKey();
+    } else if (!this.challengeSeed) {
+      this.challengeSeed = Date.now().toString();
+    }
+    this.rng = createSeededRNG(this.challengeSeed);
   }
 
   /** Routes every screen shake through the reduced-motion check in one place, rather than
@@ -361,7 +374,6 @@ export class GameScene extends Phaser.Scene {
     // Stats section of the panel (yellow, per the sketch): Score (left) / Best (right), plus the
     // Purr Meter bar. No next-cat preview here — the hovering drop cat in the arena already
     // shows exactly what's about to fall, so a second "next" box was redundant. One compact line
-    // per side instead of a label-over-number card — the arena gets the vertical space back.
     const statsTop = PANEL_TOP + 9;
 
     this.scoreValueText = this.add.text(PANEL_LEFT + 10, statsTop, 'SCORE 0', {
@@ -372,11 +384,11 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.bestValueText = this.add
-      .text(PANEL_RIGHT - 10, statsTop, `BEST ${this.score.best}`, {
+      .text(PANEL_RIGHT - 10, statsTop, this.targetScore ? `🎯 TARGET ${this.targetScore}` : `BEST ${this.score.best}`, {
         fontFamily: UI_FONT_FAMILY,
         fontSize: '16px',
         fontStyle: '800',
-        color: '#3a2b22',
+        color: this.targetScore ? '#b84a26' : '#3a2b22',
       })
       .setOrigin(1, 0);
 
@@ -853,8 +865,8 @@ export class GameScene extends Phaser.Scene {
   private rollLevel(): { level: number; isGolden: boolean } {
     const goldenChance = GOLDEN_CAT_CHANCE * (this.modifier?.goldenChanceMultiplier ?? 1);
     return {
-      level: pickWeightedSpawnLevel(this.modifier?.spawnLevels),
-      isGolden: Math.random() < goldenChance,
+      level: pickWeightedSpawnLevel(this.modifier?.spawnLevels, this.rng),
+      isGolden: this.rng() < goldenChance,
     };
   }
 
@@ -2122,6 +2134,7 @@ export class GameScene extends Phaser.Scene {
     const reviveWithAd = createButton(this, centerX, centerY + 55, '📺  Watch ad — Free', THEME.info, {
       minWidth: 220,
       fontSize: 16,
+      icon: 'play',
       onTap: () => this.acceptReviveViaAd(),
     });
     this.reviveWithAdButton = reviveWithAd.container;
@@ -2214,9 +2227,10 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    const shareButton = createButton(this, centerX, centerY + 250, '🐾 Share Score', THEME.primary, {
+    const shareButton = createButton(this, centerX, centerY + 250, 'Challenge a Friend', THEME.primary, {
       fontSize: 17,
       minWidth: 200,
+      icon: 'trophy',
       onTap: () => this.shareScore(),
     });
 
@@ -2278,10 +2292,20 @@ export class GameScene extends Phaser.Scene {
    * the wording can't drift between them. */
   private shareContent(): ShareContent {
     const bestCat = getCatData(this.highestLevelThisRun);
+    
+    // Generate a fresh seed for the challenge so the friend gets a new deterministic board,
+    // not exactly the one we just played (unless we want them to play the same seed we did).
+    // Actually, playing the exact same seed is the fairest test of skill!
+    const seed = this.challengeSeed ?? Date.now().toString();
+    const url = new URL(window.location.href);
+    url.searchParams.set('mode', 'challenge');
+    url.searchParams.set('seed', seed);
+    url.searchParams.set('target', this.score.score.toString());
+
     return {
-      title: 'Cat-astrophe',
-      text: `I reached ${bestCat.name} with a score of ${this.score.score} in Cat-astrophe! 🐱 Can you beat me?`,
-      url: window.location.href,
+      title: 'Cat-astrophe Challenge',
+      text: `I reached ${bestCat.name} with a score of ${this.score.score} in Cat-astrophe! 🐱 Can you beat my exact board?`,
+      url: url.toString(),
     };
   }
 

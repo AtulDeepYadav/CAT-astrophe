@@ -37,8 +37,8 @@ export const CONTAINER_FLOOR = PANEL_BOTTOM - WALL_THICKNESS;
 export const DANGER_LINE_Y = CONTAINER_TOP + 30;
 
 /** 'zen' skips the danger line/game-over entirely; 'daily' applies that day's seeded modifier
- * (see dailyChallenges.ts) on top of otherwise-normal rules. */
-export type GameMode = 'normal' | 'zen' | 'daily';
+ * (see dailyChallenges.ts) on top of otherwise-normal rules. 'challenge' uses a specific URL seed. */
+export type GameMode = 'normal' | 'zen' | 'daily' | 'challenge';
 
 /** Fish cost of the one revive offer per run — see CurrencySystem and GameScene's
  * showReviveOffer. Roughly a run and a half of Fish at the low end of fishEarnedForScore, so a

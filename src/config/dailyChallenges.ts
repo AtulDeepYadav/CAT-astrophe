@@ -63,7 +63,7 @@ export function todayKey(date: Date = new Date()): string {
 
 /** A tiny stable string hash (djb2) — good enough to pick a modifier index, not for anything
  * security-sensitive. */
-function hashString(input: string): number {
+export function hashString(input: string): number {
   let hash = 5381;
   for (let i = 0; i < input.length; i += 1) {
     hash = (hash * 33) ^ input.charCodeAt(i);
@@ -74,4 +74,18 @@ function hashString(input: string): number {
 export function todaysModifier(date: Date = new Date()): DailyModifier {
   const index = hashString(todayKey(date)) % DAILY_MODIFIERS.length;
   return DAILY_MODIFIERS[index];
+}
+
+/** 
+ * Mulberry32 PRNG — returns a function that produces deterministic pseudo-random floats [0, 1).
+ * Used for physics seeds (Daily/Challenge mode) so friends get the exact same cat drops.
+ */
+export function createSeededRNG(seedStr: string): () => number {
+  let a = hashString(seedStr);
+  return function () {
+    let t = (a += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
