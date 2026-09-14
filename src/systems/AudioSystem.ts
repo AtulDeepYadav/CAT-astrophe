@@ -14,7 +14,9 @@ export class AudioSystem {
    * ctx.destination — muting is then one gain change here instead of touching each of the 9
    * play methods individually. */
   private masterGain: GainNode | null = null;
-  private muted = false;
+  /** SFX-only — this class is every sound effect in the game, never the ambient music loop (see
+   * MusicSystem for that, muted independently via its own setMusicMuted). */
+  private sfxMuted = false;
   /** Optional — lets playMergeTone play a real preloaded clip via Phaser's sound manager instead of synthesizing. */
   private scene: Phaser.Scene | null;
 
@@ -30,17 +32,21 @@ export class AudioSystem {
     }
   }
 
-  setMuted(muted: boolean) {
-    this.muted = muted;
+  setSfxMuted(muted: boolean) {
+    this.sfxMuted = muted;
     if (this.masterGain) {
       this.masterGain.gain.value = muted ? 0 : 1;
     }
-    // The one real recorded clip path (playMergeTone's hasMergeSound branch) goes through
-    // Phaser's own sound manager, not this class's AudioContext — needs its own mute switch.
-    this.scene?.sound.setMute(muted);
+    // No `scene.sound.setMute()` here on purpose — that mutes the whole shared sound manager,
+    // the ambient music track included (see MusicSystem's own doc comment on why it doesn't
+    // handle mute itself). The one real-clip path below (hasMergeSound) is gated individually
+    // instead, so SFX and Music stay fully independent.
   }
 
   playMergeTone(level: number) {
+    if (this.sfxMuted) {
+      return;
+    }
     if (this.scene && hasMergeSound(level)) {
       this.scene.sound.play(mergeSoundKey(level), { volume: 0.6 });
       return;
@@ -327,7 +333,7 @@ export class AudioSystem {
       }
       this.ctx = new AudioContextCtor();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = this.muted ? 0 : 1;
+      this.masterGain.gain.value = this.sfxMuted ? 0 : 1;
       this.masterGain.connect(this.ctx.destination);
       return this.ctx;
     } catch {

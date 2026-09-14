@@ -15,7 +15,7 @@ import { StreakSystem } from '../systems/StreakSystem';
 import { exportSaveData, importSaveData } from '../systems/saveBackup';
 import { getCatData, portraitTextureKeyForLevel } from '../config/catData';
 import { shareViaWebShare } from '../systems/socialShare';
-import { ensureAmbientMusic } from '../systems/MusicSystem';
+import { ensureAmbientMusic, setMusicMuted } from '../systems/MusicSystem';
 import { THEME, bodyTextStyle, createButton, createIconButton, createPanel, setContainerInteractive } from '../ui/uiKit';
 import { monetization } from '../systems/MonetizationSystem';
 
@@ -74,16 +74,20 @@ export class MenuScene extends Phaser.Scene {
     wash.fillGradientStyle(0x1a1008, 0x1a1008, 0x1a1008, 0x1a1008, 0.55, 0.55, 0, 0);
     wash.fillRect(0, 0, GAME_WIDTH, 520);
 
-    ensureAmbientMusic(this);
+    ensureAmbientMusic(this, this.settings.musicMuted);
 
-    // Mute toggle, top-right — so a player can silence the game before ever tapping Play, not
-    // only from inside a run's pause menu.
-    this.muteIcon = createIconButton(this, GAME_WIDTH - 34, 34, this.settings.muted ? 'speakerOff' : 'speakerOn', {
+    // Music toggle, top-right — the only audio the Menu itself ever plays is this ambient loop
+    // (no SFX, no haptics happen outside a run), so this icon controls Music specifically rather
+    // than a combined "everything" mute; SFX and Haptics have their own toggles in the in-run
+    // Pause menu, where they're actually relevant. Lets a player silence the music before ever
+    // tapping Play, not only from inside a run's pause menu.
+    this.muteIcon = createIconButton(this, GAME_WIDTH - 34, 34, this.settings.musicMuted ? 'speakerOff' : 'speakerOn', {
       radius: 19,
       depth: 50,
       onTap: () => {
-        const nextMuted = !this.settings.muted;
-        this.settings.setMuted(nextMuted);
+        const nextMuted = !this.settings.musicMuted;
+        this.settings.setMusicMuted(nextMuted);
+        setMusicMuted(nextMuted);
         this.muteIcon.setIcon(nextMuted ? 'speakerOff' : 'speakerOn');
       },
     });

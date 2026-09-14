@@ -1,13 +1,15 @@
 const STORAGE_KEY = 'cat-kingdom:settings';
 
 interface Settings {
-  muted: boolean;
+  musicMuted: boolean;
+  sfxMuted: boolean;
+  hapticsEnabled: boolean;
 }
 
-const DEFAULT_SETTINGS: Settings = { muted: false };
+const DEFAULT_SETTINGS: Settings = { musicMuted: false, sfxMuted: false, hapticsEnabled: true };
 
-/** Player-facing preferences — currently just sound on/off, but the one place any future
- * settings (haptics on/off, etc.) would live rather than each getting their own ad-hoc key. */
+/** Player-facing preferences — the one place any settings (Music/SFX/Haptics, and whatever's
+ * added later) live rather than each getting their own ad-hoc key. */
 export class SettingsSystem {
   private settings: Settings;
 
@@ -15,12 +17,30 @@ export class SettingsSystem {
     this.settings = SettingsSystem.load();
   }
 
-  get muted(): boolean {
-    return this.settings.muted;
+  get musicMuted(): boolean {
+    return this.settings.musicMuted;
   }
 
-  setMuted(muted: boolean) {
-    this.settings = { ...this.settings, muted };
+  get sfxMuted(): boolean {
+    return this.settings.sfxMuted;
+  }
+
+  get hapticsEnabled(): boolean {
+    return this.settings.hapticsEnabled;
+  }
+
+  setMusicMuted(musicMuted: boolean) {
+    this.settings = { ...this.settings, musicMuted };
+    SettingsSystem.save(this.settings);
+  }
+
+  setSfxMuted(sfxMuted: boolean) {
+    this.settings = { ...this.settings, sfxMuted };
+    SettingsSystem.save(this.settings);
+  }
+
+  setHapticsEnabled(hapticsEnabled: boolean) {
+    this.settings = { ...this.settings, hapticsEnabled };
     SettingsSystem.save(this.settings);
   }
 
@@ -30,7 +50,13 @@ export class SettingsSystem {
       if (!raw) {
         return { ...DEFAULT_SETTINGS };
       }
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+      const parsed = JSON.parse(raw);
+      // Migrate a pre-split save (one combined `muted` flag) onto both new fields, rather than
+      // silently resetting a tester's sound preference back to "on" the first time this runs.
+      if (typeof parsed.muted === 'boolean' && parsed.musicMuted === undefined && parsed.sfxMuted === undefined) {
+        return { ...DEFAULT_SETTINGS, musicMuted: parsed.muted, sfxMuted: parsed.muted };
+      }
+      return { ...DEFAULT_SETTINGS, ...parsed };
     } catch {
       return { ...DEFAULT_SETTINGS };
     }

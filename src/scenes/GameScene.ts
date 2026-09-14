@@ -51,7 +51,7 @@ import { DailyChallengeSystem } from '../systems/DailyChallengeSystem';
 import { SettingsSystem } from '../systems/SettingsSystem';
 import { OnboardingSystem } from '../systems/OnboardingSystem';
 import { CurrencySystem, fishEarnedForScore } from '../systems/CurrencySystem';
-import { ensureAmbientMusic } from '../systems/MusicSystem';
+import { ensureAmbientMusic, setMusicMuted } from '../systems/MusicSystem';
 import { monetization } from '../systems/MonetizationSystem';
 import { THEME, createButton, createIconButton, createPanel, drawIconGlyph, setContainerInteractive } from '../ui/uiKit';
 import { REVIVE_COST_FISH } from '../config/gameConfig';
@@ -170,7 +170,9 @@ export class GameScene extends Phaser.Scene {
 
   private pauseButtonBounds = { x: 0, y: 0, radius: 22 };
   private pauseContainer!: Phaser.GameObjects.Container;
-  private setMuteButtonLabel!: (label: string) => void;
+  private setMusicButtonLabel!: (label: string) => void;
+  private setSfxButtonLabel!: (label: string) => void;
+  private setHapticsButtonLabel!: (label: string) => void;
   private isPaused = false;
   // Re-read fresh in create(), not a field initializer here — a field initializer only runs once
   // at Scene construction (game boot), but scene.start()/restart() reuse the same Scene object
@@ -311,8 +313,8 @@ export class GameScene extends Phaser.Scene {
     this.dailyChallenge = new DailyChallengeSystem();
     this.currency = new CurrencySystem();
     this.hasUsedRevive = false;
-    this.audio.setMuted(this.settings.muted);
-    ensureAmbientMusic(this);
+    this.audio.setSfxMuted(this.settings.sfxMuted);
+    ensureAmbientMusic(this, this.settings.musicMuted);
     this.score.reset();
     // Fresh instances each run (restart() reuses this Scene object rather than reconstructing it,
     // so these need a hard reset the way `score` gets via .reset() — ScoreSystem keeps `best`
@@ -1163,24 +1165,42 @@ export class GameScene extends Phaser.Scene {
     this.modalHistoryDepth = 0;
   };
 
-  private toggleMute() {
-    const nextMuted = !this.settings.muted;
-    this.settings.setMuted(nextMuted);
-    this.audio.setMuted(nextMuted);
-    this.setMuteButtonLabel(nextMuted ? '🔇 Sound: Off' : '🔊 Sound: On');
+  private toggleMusicMuted() {
+    const nextMuted = !this.settings.musicMuted;
+    this.settings.setMusicMuted(nextMuted);
+    setMusicMuted(nextMuted);
+    this.setMusicButtonLabel(nextMuted ? '🔇 Music: Off' : '🎵 Music: On');
+  }
+
+  private toggleSfxMuted() {
+    const nextMuted = !this.settings.sfxMuted;
+    this.settings.setSfxMuted(nextMuted);
+    this.audio.setSfxMuted(nextMuted);
+    this.setSfxButtonLabel(nextMuted ? '🔇 SFX: Off' : '🔊 SFX: On');
+  }
+
+  private toggleHaptics() {
+    const nextEnabled = !this.settings.hapticsEnabled;
+    this.settings.setHapticsEnabled(nextEnabled);
+    this.setHapticsButtonLabel(nextEnabled ? '📳 Haptics: On' : '📴 Haptics: Off');
   }
 
   /**
-   * Pause overlay: Resume / mute toggle / Restart (same mode) / Menu. Physics is genuinely
-   * stopped here (this.matter.world.pause()), unlike the Collection Book overlay which leaves
-   * the board running underneath — pausing mid-drop is the one place a player can actually step
-   * away without the board filling up while they're gone.
+   * Pause overlay: Resume / Music / SFX / Haptics toggles / Restart (same mode) / Menu. Physics
+   * is genuinely stopped here (this.matter.world.pause()), unlike the Collection Book overlay
+   * which leaves the board running underneath — pausing mid-drop is the one place a player can
+   * actually step away without the board filling up while they're gone.
+   *
+   * The single Sound toggle used to live here; it's now three independent ones (Music/SFX/
+   * Haptics — a player muting the ambient loop shouldn't also lose merge sounds or vice versa),
+   * so the panel grew to fit them — same 65px bottom margin the original design used, just
+   * applied after three rows instead of one.
    */
   private buildPauseOverlay(): Phaser.GameObjects.Container {
     const centerX = GAME_WIDTH / 2;
     const centerY = GAME_HEIGHT / 2;
     const overlayBg = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x1a1410, 0.85).setOrigin(0, 0);
-    const panel = createPanel(this, centerX, centerY, 300, 380, { radius: 28 });
+    const panel = createPanel(this, centerX, centerY, 300, 560, { radius: 28 });
 
     const title = this.add
       .text(centerX, centerY - 150, '⏸ Paused', {
@@ -1195,23 +1215,41 @@ export class GameScene extends Phaser.Scene {
       minWidth: 220,
       onTap: () => this.closePause(),
     });
-    const muteBtn = createButton(
+    const musicBtn = createButton(
       this,
       centerX,
       centerY - 5,
-      this.settings.muted ? '🔇 Sound: Off' : '🔊 Sound: On',
+      this.settings.musicMuted ? '🔇 Music: Off' : '🎵 Music: On',
       THEME.info,
-      { fontSize: 17, minWidth: 220, onTap: () => this.toggleMute() },
+      { fontSize: 17, minWidth: 220, onTap: () => this.toggleMusicMuted() },
     );
-    this.setMuteButtonLabel = muteBtn.setLabel;
-    const restart = createButton(this, centerX, centerY + 60, '↻  Restart', THEME.gold, {
+    this.setMusicButtonLabel = musicBtn.setLabel;
+    const sfxBtn = createButton(
+      this,
+      centerX,
+      centerY + 50,
+      this.settings.sfxMuted ? '🔇 SFX: Off' : '🔊 SFX: On',
+      THEME.info,
+      { fontSize: 17, minWidth: 220, onTap: () => this.toggleSfxMuted() },
+    );
+    this.setSfxButtonLabel = sfxBtn.setLabel;
+    const hapticsBtn = createButton(
+      this,
+      centerX,
+      centerY + 105,
+      this.settings.hapticsEnabled ? '📳 Haptics: On' : '📴 Haptics: Off',
+      THEME.info,
+      { fontSize: 17, minWidth: 220, onTap: () => this.toggleHaptics() },
+    );
+    this.setHapticsButtonLabel = hapticsBtn.setLabel;
+    const restart = createButton(this, centerX, centerY + 160, '↻  Restart', THEME.gold, {
       minWidth: 220,
       onTap: () => {
         this.closePause();
         this.scene.restart(this.restartData());
       },
     });
-    const menu = createButton(this, centerX, centerY + 125, '🏠  Menu', THEME.calm, {
+    const menu = createButton(this, centerX, centerY + 215, '🏠  Menu', THEME.calm, {
       minWidth: 220,
       onTap: () => {
         this.closePause();
@@ -1224,7 +1262,9 @@ export class GameScene extends Phaser.Scene {
       panel,
       title,
       resume.container,
-      muteBtn.container,
+      musicBtn.container,
+      sfxBtn.container,
+      hapticsBtn.container,
       restart.container,
       menu.container,
     ]);
@@ -1827,10 +1867,10 @@ export class GameScene extends Phaser.Scene {
 
   /** No-op on desktop/unsupported browsers (Vibration API is mobile-only) and silently swallows
    * any exception — some browsers throw rather than returning false when called outside a user
-   * gesture. Gated on the same mute setting as sound: a "quiet" toggle reasonably means don't
-   * buzz the phone either, not just don't play sound. */
+   * gesture. Gated on its own Haptics setting, independent of Music/SFX — some players want the
+   * buzz but not the sound, or vice versa. */
   private vibrate(pattern: number | number[]) {
-    if (this.settings.muted) {
+    if (!this.settings.hapticsEnabled) {
       return;
     }
     try {
