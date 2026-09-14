@@ -316,7 +316,9 @@ export class GameScene extends Phaser.Scene {
     this.leaderboard = new LeaderboardSystem();
     this.dailyChallenge = new DailyChallengeSystem();
     this.currency = new CurrencySystem();
-    this.quests = new QuestSystem();
+    // Ad-quests are excluded entirely on web (monetization.isNative false there) — see
+    // QuestSystem's own constructor doc for why a filtered-out pool beats a drawn-then-dead quest.
+    this.quests = new QuestSystem(monetization.isNative);
     this.hasUsedRevive = false;
     this.audio.setSfxMuted(this.settings.sfxMuted);
     ensureAmbientMusic(this, this.settings.musicMuted);
@@ -328,6 +330,12 @@ export class GameScene extends Phaser.Scene {
     this.purrMeter = new PurrMeterSystem();
     this.highestLevelThisRun = 1;
     this.challengeBeatenThisRun = false;
+    // A toast mid-animation when restart() tears down the display list never reaches its own
+    // onComplete, which is the only thing that would otherwise flip toastActive back off — left
+    // unreset, every showToast() call for the rest of this new run would queue silently forever
+    // and never actually show anything.
+    this.toastQueue = [];
+    this.toastActive = false;
     this.currentZoneKey = zoneForLevel(1).key;
     this.isGameOver = false;
     this.canDrop = true;
@@ -2694,8 +2702,30 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** Small transient message over the game-over overlay — used by the share-fallback paths. */
+  /** Small transient message over the game-over overlay — used by the share-fallback paths, and
+   * (since Daily Quests) by reward toasts that can now genuinely land back-to-back — e.g. a single
+   * merge crossing two different quests' targets at once, or Double Fish's own "+N more!" landing
+   * right alongside an ad-quest completing off the very same ad watch. Queued rather than shown
+   * immediately: two toasts firing in the same instant used to just render on top of each other at
+   * the same fixed position, unreadable. */
+  private toastQueue: string[] = [];
+  private toastActive = false;
+
   private showToast(message: string) {
+    this.toastQueue.push(message);
+    if (!this.toastActive) {
+      this.advanceToastQueue();
+    }
+  }
+
+  private advanceToastQueue() {
+    const message = this.toastQueue.shift();
+    if (message === undefined) {
+      this.toastActive = false;
+      return;
+    }
+    this.toastActive = true;
+
     const toast = this.add
       .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 335, message, {
         fontFamily: UI_FONT_FAMILY,
@@ -2711,7 +2741,16 @@ export class GameScene extends Phaser.Scene {
       alpha: 1,
       duration: 200,
       onComplete: () => {
-        this.tweens.add({ targets: toast, alpha: 0, duration: 400, delay: 1400, onComplete: () => toast.destroy() });
+        this.tweens.add({
+          targets: toast,
+          alpha: 0,
+          duration: 400,
+          delay: 1400,
+          onComplete: () => {
+            toast.destroy();
+            this.advanceToastQueue();
+          },
+        });
       },
     });
   }
@@ -2789,6 +2828,11 @@ export class GameScene extends Phaser.Scene {
       this.showToast("Ad didn't finish — try again or spend 🐟");
       return;
     }
+    // Counts toward the "watch N ads" quest regardless of which rewarded-ad path earned it —
+    // there's no dedicated ad-only placement in this game, just whichever offer the player
+    // reached for. A stacked toast (this quest completing right alongside the revive itself) is
+    // fine now that showToast queues instead of overlapping.
+    this.handleQuestProgress(this.quests.recordAdWatched());
     this.performRevive();
   }
 
@@ -2801,6 +2845,7 @@ export class GameScene extends Phaser.Scene {
       this.showToast("Ad didn't finish — try again?");
       return;
     }
+    this.handleQuestProgress(this.quests.recordAdWatched());
     this.currency.add(this.pendingDoubleFishAmount);
     this.showToast(`+${this.pendingDoubleFishAmount} 🐟 more!`);
     this.doubleFishButton.container.setVisible(false);

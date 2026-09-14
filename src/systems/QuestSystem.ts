@@ -10,7 +10,8 @@ export type QuestType =
   | 'games_played'
   | 'level_reached'
   | 'vaporize'
-  | 'yarn_ball';
+  | 'yarn_ball'
+  | 'ads_watched';
 
 export interface QuestTemplate {
   id: string;
@@ -41,7 +42,15 @@ export const QUEST_POOL: QuestTemplate[] = [
   { id: 'tiger_1', type: 'level_reached', icon: '🐯', name: 'Big Game', description: 'Reach a Tiger.', target: 9, rewardFish: 25 },
   { id: 'vaporize_1', type: 'vaporize', icon: '🌪️', name: 'Clean Sweep', description: 'Trigger Vaporize once.', target: 1, rewardFish: 20 },
   { id: 'yarn_1', type: 'yarn_ball', icon: '🧶', name: 'Playtime', description: 'Fill the Purr Meter for a Yarn Ball.', target: 1, rewardFish: 10 },
+  // Android-only — a rewarded ad never actually shows on the web build (see
+  // MonetizationSystem's class doc), so this is excluded from the daily draw entirely unless
+  // QuestSystem is constructed with includeAdQuests: true. Counts any rewarded ad watched to
+  // completion (a revive, Double Fish, whichever comes first), not a dedicated "watch an ad for
+  // no other reason" flow — this game has no separate ad-only placement to point at.
+  { id: 'watch_ads_3', type: 'ads_watched', icon: '📺', name: 'Ad Break', description: 'Watch 3 rewarded ads.', target: 3, rewardFish: 20 },
 ];
+
+const AD_QUEST_TYPE: QuestType = 'ads_watched';
 
 interface QuestRecord {
   date: string;
@@ -59,8 +68,12 @@ interface QuestRecord {
 export class QuestSystem {
   private record: QuestRecord;
 
-  constructor() {
-    this.record = QuestSystem.load();
+  /** `includeAdQuests` should be `monetization.isNative` — false on the web build, where a
+   * rewarded ad never shows at all, so an ad-watching quest would be a dead end for every web
+   * player. Defaults to false so every other call site (and any test code) keeps working
+   * unchanged without needing to know about ad-quests at all. */
+  constructor(includeAdQuests = false) {
+    this.record = QuestSystem.load(includeAdQuests);
   }
 
   getTodaysQuests(): ActiveQuest[] {
@@ -99,6 +112,10 @@ export class QuestSystem {
     return this.recordProgress('yarn_ball', 1, true);
   }
 
+  recordAdWatched(): ActiveQuest | null {
+    return this.recordProgress(AD_QUEST_TYPE, 1, true);
+  }
+
   /** Applies `value` to every active quest of this type — added for cumulative types (merge
    * counts, one-off events), or taken as a running max for "reach N" types (combo/level, where
    * the event value is the height reached this one time, not a count of times it happened).
@@ -130,7 +147,7 @@ export class QuestSystem {
     }
   }
 
-  private static load(): QuestRecord {
+  private static load(includeAdQuests: boolean): QuestRecord {
     const today = todayKey();
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -143,16 +160,19 @@ export class QuestSystem {
     } catch {
       // Fall through to a fresh day below.
     }
-    return QuestSystem.freshRecord(today);
+    return QuestSystem.freshRecord(today, includeAdQuests);
   }
 
   /** Picks QUESTS_PER_DAY distinct templates via the same seeded-RNG approach as the Daily
    * Challenge's modifier — a Fisher-Yates-style draw-without-replacement from the pool, seeded off
    * today's date (plus a distinguishing suffix, so this doesn't happen to draw in lockstep with
-   * anything else that also seeds off the bare date string). */
-  private static freshRecord(today: string): QuestRecord {
+   * anything else that also seeds off the bare date string). Ad-quests are filtered out of the
+   * pool entirely first when `includeAdQuests` is false, rather than drawn-then-skipped — keeps
+   * every player's remaining quest count and odds identical to what they'd be if ad-quests didn't
+   * exist for them at all, instead of quietly shrinking their day to 2 quests. */
+  private static freshRecord(today: string, includeAdQuests: boolean): QuestRecord {
     const rng = createSeededRNG(`${today}:quests:${hashString(today)}`);
-    const pool = [...QUEST_POOL];
+    const pool = QUEST_POOL.filter((q) => includeAdQuests || q.type !== AD_QUEST_TYPE);
     const questIds: string[] = [];
     const count = Math.min(QUESTS_PER_DAY, pool.length);
     for (let i = 0; i < count; i += 1) {
