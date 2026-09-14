@@ -309,6 +309,21 @@ export class GameScene extends Phaser.Scene {
       true,
     );
 
+    // The `top` wall above is deliberately off (cats have to be able to fall in from above
+    // CONTAINER_TOP) — but nothing else stops a pile from growing forever, and Zen Mode has no
+    // danger-line game over to end a run before that happens. Long enough Zen play (or, as found,
+    // heavy rapid-drop testing) let cats climb high enough to render above the header/score bar,
+    // clipping through UI that's meant to always stay on top. A single static ceiling pinned to
+    // the very top of the canvas — well above the drop-in spawn point at CONTAINER_TOP + radius,
+    // so it never interferes with a normal drop — keeps every cat inside the visible screen in
+    // every mode, without touching the drop-in mechanic or the (much lower, unrelated) danger line.
+    // `world.create` (not `add.rectangle`) so this is a plain physics body with no visible
+    // sprite, matching the setBounds walls above rather than rendering a stray rectangle.
+    this.matter.world.create(GAME_WIDTH / 2, -WALL_THICKNESS / 2, GAME_WIDTH, WALL_THICKNESS, {
+      isStatic: true,
+      label: 'ceiling',
+    });
+
     // World backdrop — drawn first (and pinned behind everything) so it sits under the header,
     // the panel, and the arena's semi-transparent fill. Swaps as `highestLevelThisRun` crosses
     // into a new zone (see updateWorldBackground); baked to exactly GAME_WIDTH x GAME_HEIGHT so
