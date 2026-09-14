@@ -1538,54 +1538,59 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Full art reskins (Robot/Pirate/8-bit, etc.) — a second, independent row list below the glow
-    // colors above. Empty (see THEME_OPTIONS's own doc comment) until real theme art exists, so
-    // this renders nothing below its own header for now — the plumbing is here and ready the
-    // moment an entry is added, nothing else in this method needs to change.
-    const themeIntroY = rowTop + COSMETIC_OPTIONS.length * rowHeight + 14;
-    const themeIntro = this.add
-      .text(GAME_WIDTH / 2, themeIntroY, 'Cat Themes', {
-        fontFamily: UI_FONT_FAMILY,
-        fontSize: '14px',
-        color: '#c9bdae',
-      })
-      .setOrigin(0.5);
-    children.push(themeIntro);
-
-    const themeRowTop = themeIntroY + 30;
+    // colors above. Empty (see THEME_OPTIONS's own doc comment) until real theme art exists —
+    // guarded on length rather than always drawing the header, so an empty roster shows nothing
+    // at all here instead of a "Cat Themes" label with nothing under it (a dangling section header
+    // reads as unfinished, exactly what we're trying to avoid ahead of Play Store review). The
+    // plumbing is otherwise ready the moment an entry is added; nothing else in this method needs
+    // to change.
     this.themeSwatchBounds = [];
-
-    for (let i = 0; i < THEME_OPTIONS.length; i++) {
-      const option = THEME_OPTIONS[i];
-      const y = themeRowTop + i * rowHeight;
-      const cx = 56;
-
-      const rowCard = this.add.graphics();
-      rowCard.fillStyle(0xfff6e8, i % 2 === 0 ? 0.07 : 0.03);
-      rowCard.fillRoundedRect(20, y - 28, GAME_WIDTH - 40, 56, 14);
-
-      const swatch = this.add.circle(cx, y, 22, 0x3a2b22, 0.5).setStrokeStyle(2, 0xfdf6ec, 0.4);
-      const icon = this.add.text(cx, y, option.icon, { fontSize: '20px' }).setOrigin(0.5);
-      const name = this.add
-        .text(cx + 40, y - 11, option.name, {
+    if (THEME_OPTIONS.length > 0) {
+      const themeIntroY = rowTop + COSMETIC_OPTIONS.length * rowHeight + 14;
+      const themeIntro = this.add
+        .text(GAME_WIDTH / 2, themeIntroY, 'Cat Themes', {
           fontFamily: UI_FONT_FAMILY,
-          fontSize: '15px',
-          color: '#fdf6ec',
-          fontStyle: 'bold',
-        })
-        .setOrigin(0, 0.5);
-      const status = this.add
-        .text(cx + 40, y + 11, '', {
-          fontFamily: UI_FONT_FAMILY,
-          fontSize: '12px',
+          fontSize: '14px',
           color: '#c9bdae',
         })
-        .setOrigin(0, 0.5);
+        .setOrigin(0.5);
+      children.push(themeIntro);
 
-      swatch.setName(`style-theme-circle-${option.id}`);
-      name.setName(`style-theme-name-${option.id}`);
-      status.setName(`style-theme-status-${option.id}`);
-      this.themeSwatchBounds.push({ id: option.id, x: cx, y, radius: 26 });
-      children.push(rowCard, swatch, icon, name, status);
+      const themeRowTop = themeIntroY + 30;
+
+      for (let i = 0; i < THEME_OPTIONS.length; i++) {
+        const option = THEME_OPTIONS[i];
+        const y = themeRowTop + i * rowHeight;
+        const cx = 56;
+
+        const rowCard = this.add.graphics();
+        rowCard.fillStyle(0xfff6e8, i % 2 === 0 ? 0.07 : 0.03);
+        rowCard.fillRoundedRect(20, y - 28, GAME_WIDTH - 40, 56, 14);
+
+        const swatch = this.add.circle(cx, y, 22, 0x3a2b22, 0.5).setStrokeStyle(2, 0xfdf6ec, 0.4);
+        const icon = this.add.text(cx, y, option.icon, { fontSize: '20px' }).setOrigin(0.5);
+        const name = this.add
+          .text(cx + 40, y - 11, option.name, {
+            fontFamily: UI_FONT_FAMILY,
+            fontSize: '15px',
+            color: '#fdf6ec',
+            fontStyle: 'bold',
+          })
+          .setOrigin(0, 0.5);
+        const status = this.add
+          .text(cx + 40, y + 11, '', {
+            fontFamily: UI_FONT_FAMILY,
+            fontSize: '12px',
+            color: '#c9bdae',
+          })
+          .setOrigin(0, 0.5);
+
+        swatch.setName(`style-theme-circle-${option.id}`);
+        name.setName(`style-theme-name-${option.id}`);
+        status.setName(`style-theme-status-${option.id}`);
+        this.themeSwatchBounds.push({ id: option.id, x: cx, y, radius: 26 });
+        children.push(rowCard, swatch, icon, name, status);
+      }
     }
 
     return this.add.container(0, 0, children);

@@ -50,11 +50,12 @@ export interface ThemeOption {
   unlockFish: number;
 }
 
-// 'robot' is a placeholder entry with no real art behind it yet — equipping it will fall back to
-// the default cat sprites everywhere (see ThemeLoader's per-file alias-on-404 behavior), so the
-// row is here purely to preview the Style tab's layout/unlock flow ahead of any actual theme art.
-// Swap in real entries (or add more) the moment art exists; nothing else needs to change.
-export const THEME_OPTIONS: ThemeOption[] = [{ id: 'robot', name: 'Robot Cats', icon: '🤖', unlockFish: 150 }];
+// Empty until real theme art exists — a 'robot' placeholder briefly lived here to preview the
+// Style tab's row layout, but selling a cosmetic that silently falls back to default art is
+// exactly the "unfinished feature" Play Store review (Rule 2.1) rejects apps for, so it came back
+// out ahead of submission. Add real entries the moment art exists; nothing else needs to change
+// (see ThemeLoader's own doc comment for the loading side of this).
+export const THEME_OPTIONS: ThemeOption[] = [];
 
 /**
  * Which golden-glow color the player has selected, persisted like the rest of the meta systems.
