@@ -2652,11 +2652,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * The "Vaporize" milestone reaction (see VAPORIZE_TRIGGERS) — briefly freezes physics, sweeps an
-   * expanding shockwave ring out from the triggering merge, and clears every cat at
-   * `maxLevelCleared` or below once the ring reaches it. Quietly no-ops if the board doesn't
-   * actually have any cat that low right now — a roar and a flash for clearing nothing would read
-   * as a bug, not an event.
+   * The "Vaporize" milestone reaction (see VAPORIZE_TRIGGERS) — a toast naming what happened,
+   * briefly freezes physics, sweeps an expanding shockwave ring out from the triggering merge, and
+   * clears every cat at `maxLevelCleared` or below once the ring reaches it. Quietly no-ops if the
+   * board doesn't actually have any cat that low right now — a roar, a flash, and a toast for
+   * clearing nothing would read as a bug, not an event.
    */
   private triggerVaporize(maxLevelCleared: number, originX: number, originY: number) {
     const targets: Cat[] = [];
@@ -2673,6 +2673,11 @@ export class GameScene extends Phaser.Scene {
     this.audio.playLionRoar();
     this.shakeCamera(300, 0.012);
     this.vibrate([30, 40, 60]);
+    // The sound/shake/shockwave alone don't say *why* a pile of cats just vanished — first time
+    // it happens, that reads as "did I just lose my cats to a bug?" rather than a payoff. Every
+    // time, not just the first (it only ever fires twice a run at most, and the count changes),
+    // same call as the Yarn Ball toast elsewhere in this file.
+    this.showToast(`🌪️ Cleared ${targets.length} small cat${targets.length === 1 ? '' : 's'} — more room to grow!`);
     // Physics pauses for the beat (Scene tweens — the ring, the puffs — aren't gated by this and
     // keep animating), then resumes once every target has been swept and destroyed.
     this.matter.world.pause();
