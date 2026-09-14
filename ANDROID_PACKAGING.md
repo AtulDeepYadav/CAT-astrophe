@@ -23,16 +23,18 @@ being given up, not free wins — worth knowing if monetization is ever dropped 
 - [x] Portrait orientation locked in `AndroidManifest.xml` (`android:screenOrientation="portrait"`),
       matching the game's fixed layout.
 - [x] [`src/systems/MonetizationSystem.ts`](src/systems/MonetizationSystem.ts) — wraps
-      `@capacitor-community/admob` (rewarded ads + interstitials) and
+      `@capacitor-community/admob` (rewarded ads + interstitials + a bottom banner) and
       `@revenuecat/purchases-capacitor` (the Remove Ads one-time purchase, handling Play Billing's
       receipt verification for you). Every method no-ops safely on the web build — ads and IAP
       only ever run inside this native app, never on cat-astrophe-rouge.vercel.app.
 - [x] Wired into the game: a rewarded-ad "watch ad, continue free" option alongside the existing
       Fish-cost revive offer (GameScene), an interstitial at the natural break after Game Over
-      (never mid-drop), and a "Remove Ads" / "Restore purchase" pair on the main menu
+      (never mid-drop), a banner shown only on Pause and the post-game summary screen (never
+      during active gameplay), and a "Remove Ads" / "Restore purchase" pair on the main menu
       (MenuScene), Android-only.
-- [x] Both plugins use Google's/RevenueCat's placeholder test IDs for now — see the `TODO` comment
-      at the top of `MonetizationSystem.ts` for exactly what to swap and where those come from.
+- [x] All three ad placements plus RevenueCat use Google's/RevenueCat's placeholder test IDs for
+      now — see the `TODO` comment at the top of `MonetizationSystem.ts` for exactly what to swap
+      and where those come from (now includes `TEST_BANNER_AD_UNIT_ANDROID` too).
 
 ## What's left — steps only you can run
 
@@ -54,10 +56,11 @@ Everything in `MonetizationSystem.ts` currently points at safe placeholder/test 
 this can earn real money:
 
 - **AdMob** (https://apps.admob.com) — create an account, register the app, create a Rewarded ad
-  unit and an Interstitial ad unit. Replace `TEST_REWARDED_AD_UNIT_ANDROID` and
-  `TEST_INTERSTITIAL_AD_UNIT_ANDROID` in `MonetizationSystem.ts` with your real ones, and add your
-  AdMob App ID to `android/app/src/main/AndroidManifest.xml` (a `<meta-data>` tag AdMob's own
-  setup docs specify — Android will crash on launch without it once you're off test ads).
+  unit, an Interstitial ad unit, and a Banner ad unit. Replace `TEST_REWARDED_AD_UNIT_ANDROID`,
+  `TEST_INTERSTITIAL_AD_UNIT_ANDROID`, and `TEST_BANNER_AD_UNIT_ANDROID` in
+  `MonetizationSystem.ts` with your real ones, and add your AdMob App ID to
+  `android/app/src/main/AndroidManifest.xml` (a `<meta-data>` tag AdMob's own setup docs specify —
+  Android will crash on launch without it once you're off test ads).
 - **RevenueCat** (https://app.revenuecat.com) — free up to $2.5k/mo tracked revenue. Create a
   project, connect it to a Play Console app (step 4 below has to exist first), create a
   `remove_ads` entitlement attached to a one-time non-consumable product, and put the project's

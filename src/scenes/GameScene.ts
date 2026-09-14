@@ -1097,6 +1097,10 @@ export class GameScene extends Phaser.Scene {
     this.pauseContainer.setVisible(true);
     setContainerInteractive(this.pauseContainer, true);
     this.pushModalHistoryEntry();
+    // Native banner — Pause is one of only two ad placements (the other is Game Over), both
+    // natural breaks rather than mid-gameplay. No-ops entirely on web / Remove Ads / a failed
+    // load, same non-throwing contract as every other MonetizationSystem call.
+    void monetization.showBanner();
   }
 
   /** `fromBackButton` skips the history.back() call — popstate already consumed the entry, and
@@ -1109,6 +1113,7 @@ export class GameScene extends Phaser.Scene {
     if (!fromBackButton) {
       this.consumeModalHistoryEntry();
     }
+    void monetization.hideBanner();
   }
 
   private dismissOnboarding(fromBackButton = false) {
@@ -2805,6 +2810,9 @@ export class GameScene extends Phaser.Scene {
     this.finalScoreText.setText(bonusLine ? `${summary}\n${bonusLine}` : summary);
     this.gameOverContainer.setVisible(true);
     setContainerInteractive(this.gameOverContainer, true);
+    // Native banner, the other of the two ad placements (see openPause) — shown once the actual
+    // post-game summary is up, not during the revive-offer decision that can precede it.
+    void monetization.showBanner();
     // Named distinctly from the unrelated showCelebrationBanner() *method* above (the generic
     // eyebrow+title achievement-toast used for discoveries elsewhere in this file) — this is
     // purely about whether to reveal newBestBanner below, nothing to do with that other mechanism.
@@ -2860,6 +2868,10 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.input.once('pointerdown', async () => {
+      // Banner comes down the moment the player acts on this screen — restart tears down and
+      // rebuilds the scene, but a native overlay isn't part of that display list and won't clean
+      // itself up on its own.
+      void monetization.hideBanner();
       // The natural-break interstitial spot: the player has already seen their result and has
       // just chosen to leave it, rather than mid-drop or before they've even seen their score.
       // No-ops entirely on web / with ads removed — see MonetizationSystem.adsDisabled.

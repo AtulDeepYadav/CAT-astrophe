@@ -18,6 +18,7 @@ const REMOVE_ADS_ENTITLEMENT = 'remove_ads';
  */
 const TEST_REWARDED_AD_UNIT_ANDROID = 'ca-app-pub-3940256099942544/5224354917';
 const TEST_INTERSTITIAL_AD_UNIT_ANDROID = 'ca-app-pub-3940256099942544/1033173712';
+const TEST_BANNER_AD_UNIT_ANDROID = 'ca-app-pub-3940256099942544/6300978111';
 const REVENUECAT_API_KEY_ANDROID = 'YOUR_REVENUECAT_PUBLIC_SDK_KEY';
 
 /**
@@ -37,6 +38,11 @@ export class MonetizationSystem {
   private initPromise: Promise<void> | null = null;
   private removeAdsPurchased = false;
   private rewardedAdReady = false;
+  /** True once a banner has been created (via showBanner) and not yet fully torn down — lets
+   * showBanner reuse the same native view (resumeBanner) instead of re-requesting a fresh ad
+   * every single time Pause opens, which a player can do many times in one run. */
+  private bannerCreated = false;
+  private bannerVisible = false;
 
   get isNative(): boolean {
     return Capacitor.isNativePlatform();
@@ -189,6 +195,46 @@ export class MonetizationSystem {
       await AdMob.showInterstitial();
     } catch {
       // Missed interstitial isn't worth surfacing to the player — just skip it this run.
+    }
+  }
+
+  /** Banner, shown only on Pause and the post-game summary (GameScene wires both call sites) —
+   * never during active gameplay. A native overlay view, not part of the Phaser display list, so
+   * it has to be explicitly shown/hidden rather than following scene visibility automatically. */
+  async showBanner() {
+    if (this.adsDisabled || this.bannerVisible) {
+      return;
+    }
+    try {
+      const { AdMob, BannerAdPosition, BannerAdSize } = await import('@capacitor-community/admob');
+      if (!this.bannerCreated) {
+        await AdMob.showBanner({
+          adId: TEST_BANNER_AD_UNIT_ANDROID,
+          isTesting: true,
+          adSize: BannerAdSize.ADAPTIVE_BANNER,
+          position: BannerAdPosition.BOTTOM_CENTER,
+        });
+        this.bannerCreated = true;
+      } else {
+        await AdMob.resumeBanner();
+      }
+      this.bannerVisible = true;
+    } catch {
+      // Missed banner isn't worth surfacing to the player — just skip it.
+    }
+  }
+
+  /** Hides (not destroys) the banner — safe to call even if none is showing. */
+  async hideBanner() {
+    if (!this.bannerVisible) {
+      return;
+    }
+    this.bannerVisible = false;
+    try {
+      const { AdMob } = await import('@capacitor-community/admob');
+      await AdMob.hideBanner();
+    } catch {
+      // Already gone / plugin unavailable — nothing to clean up.
     }
   }
 }
