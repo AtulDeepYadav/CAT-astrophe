@@ -42,7 +42,8 @@ import { IdleSystem } from '../systems/IdleSystem';
 import { CollectionSystem } from '../systems/CollectionSystem';
 import { StatsSystem } from '../systems/StatsSystem';
 import { ACHIEVEMENTS, AchievementSystem } from '../systems/AchievementSystem';
-import { COSMETIC_OPTIONS, CosmeticsSystem } from '../systems/CosmeticsSystem';
+import { COSMETIC_OPTIONS, CosmeticsSystem, THEME_OPTIONS } from '../systems/CosmeticsSystem';
+import { loadTheme } from '../systems/ThemeLoader';
 import type { DailyModifier } from '../config/dailyChallenges';
 import { todayKey, todaysModifier, createSeededRNG } from '../config/dailyChallenges';
 import { LeaderboardSystem } from '../systems/LeaderboardSystem';
@@ -165,6 +166,7 @@ export class GameScene extends Phaser.Scene {
   }[] = [];
   private collectionButtonBounds = { x: 0, y: 0, radius: 22 };
   private cosmeticSwatchBounds: { id: string; x: number; y: number; radius: number }[] = [];
+  private themeSwatchBounds: { id: string; x: number; y: number; radius: number }[] = [];
 
   private pauseButtonBounds = { x: 0, y: 0, radius: 22 };
   private pauseContainer!: Phaser.GameObjects.Container;
@@ -437,7 +439,7 @@ export class GameScene extends Phaser.Scene {
       repeat: -1,
       ease: 'Sine.easeInOut',
     });
-    this.dropPreviewImage = this.add.image(0, 0, textureKeyForLevel(1));
+    this.dropPreviewImage = this.add.image(0, 0, textureKeyForLevel(1, this.cosmetics.getSelectedThemeId()));
 
     const rolled = this.rollLevel();
     this.dropLevel = rolled.level;
@@ -626,6 +628,12 @@ export class GameScene extends Phaser.Scene {
           const swatchHit = this.hitTestCosmeticSwatch(pointer.x, pointer.y);
           if (swatchHit) {
             this.selectCosmetic(swatchHit);
+            this.suppressNextDrop = true;
+            return;
+          }
+          const themeHit = this.hitTestThemeSwatch(pointer.x, pointer.y);
+          if (themeHit) {
+            void this.selectTheme(themeHit);
             this.suppressNextDrop = true;
             return;
           }
@@ -935,7 +943,7 @@ export class GameScene extends Phaser.Scene {
 
   /** Syncs the hovering arena preview to `dropLevel`/`dropIsGolden` — the cat about to be dropped. */
   private updateDropPreview() {
-    this.dropPreviewImage.setTexture(textureKeyForLevel(this.dropLevel));
+    this.dropPreviewImage.setTexture(textureKeyForLevel(this.dropLevel, this.cosmetics.getSelectedThemeId()));
     const radius = getCatData(this.dropLevel).radius;
     this.dropPreviewImage.setScale((radius * 2) / this.dropPreviewImage.height);
     this.dropPreviewGlow.setVisible(this.dropIsGolden);
@@ -977,6 +985,7 @@ export class GameScene extends Phaser.Scene {
       level,
       isGolden,
       this.cosmetics.getSelectedColor(),
+      this.cosmetics.getSelectedThemeId(),
     );
 
     const rolled = this.rollLevel();
@@ -1528,6 +1537,57 @@ export class GameScene extends Phaser.Scene {
       children.push(rowCard, circle, name, status);
     }
 
+    // Full art reskins (Robot/Pirate/8-bit, etc.) — a second, independent row list below the glow
+    // colors above. Empty (see THEME_OPTIONS's own doc comment) until real theme art exists, so
+    // this renders nothing below its own header for now — the plumbing is here and ready the
+    // moment an entry is added, nothing else in this method needs to change.
+    const themeIntroY = rowTop + COSMETIC_OPTIONS.length * rowHeight + 14;
+    const themeIntro = this.add
+      .text(GAME_WIDTH / 2, themeIntroY, 'Cat Themes', {
+        fontFamily: UI_FONT_FAMILY,
+        fontSize: '14px',
+        color: '#c9bdae',
+      })
+      .setOrigin(0.5);
+    children.push(themeIntro);
+
+    const themeRowTop = themeIntroY + 30;
+    this.themeSwatchBounds = [];
+
+    for (let i = 0; i < THEME_OPTIONS.length; i++) {
+      const option = THEME_OPTIONS[i];
+      const y = themeRowTop + i * rowHeight;
+      const cx = 56;
+
+      const rowCard = this.add.graphics();
+      rowCard.fillStyle(0xfff6e8, i % 2 === 0 ? 0.07 : 0.03);
+      rowCard.fillRoundedRect(20, y - 28, GAME_WIDTH - 40, 56, 14);
+
+      const swatch = this.add.circle(cx, y, 22, 0x3a2b22, 0.5).setStrokeStyle(2, 0xfdf6ec, 0.4);
+      const icon = this.add.text(cx, y, option.icon, { fontSize: '20px' }).setOrigin(0.5);
+      const name = this.add
+        .text(cx + 40, y - 11, option.name, {
+          fontFamily: UI_FONT_FAMILY,
+          fontSize: '15px',
+          color: '#fdf6ec',
+          fontStyle: 'bold',
+        })
+        .setOrigin(0, 0.5);
+      const status = this.add
+        .text(cx + 40, y + 11, '', {
+          fontFamily: UI_FONT_FAMILY,
+          fontSize: '12px',
+          color: '#c9bdae',
+        })
+        .setOrigin(0, 0.5);
+
+      swatch.setName(`style-theme-circle-${option.id}`);
+      name.setName(`style-theme-name-${option.id}`);
+      status.setName(`style-theme-status-${option.id}`);
+      this.themeSwatchBounds.push({ id: option.id, x: cx, y, radius: 26 });
+      children.push(rowCard, swatch, icon, name, status);
+    }
+
     return this.add.container(0, 0, children);
   }
 
@@ -1536,7 +1596,10 @@ export class GameScene extends Phaser.Scene {
     for (const cell of this.collectionCells) {
       const discovered = this.collection.isDiscovered(cell.level);
 
-      cell.image.setTexture(discovered ? textureKeyForLevel(cell.level) : silhouetteTextureKeyForLevel(cell.level));
+      const theme = this.cosmetics.getSelectedThemeId();
+      cell.image.setTexture(
+        discovered ? textureKeyForLevel(cell.level, theme) : silhouetteTextureKeyForLevel(cell.level, theme),
+      );
       cell.image.setScale(COLLECTION_CELL_IMAGE_HEIGHT / cell.image.height);
       cell.name.setText(discovered ? getCatData(cell.level).name : '???');
       cell.tier.setText(discovered ? getCatData(cell.level).tier : '');
@@ -1617,6 +1680,15 @@ export class GameScene extends Phaser.Scene {
     return null;
   }
 
+  private hitTestThemeSwatch(x: number, y: number): string | null {
+    for (const swatch of this.themeSwatchBounds) {
+      if (Phaser.Math.Distance.Between(x, y, swatch.x, swatch.y) <= swatch.radius) {
+        return swatch.id;
+      }
+    }
+    return null;
+  }
+
   /**
    * Selects a cosmetic if already unlocked; if it's locked, spends Fish to unlock it on the spot
    * instead of silently no-opping — the first real purchase Fish can make besides a Revive. A tap
@@ -1643,6 +1715,33 @@ export class GameScene extends Phaser.Scene {
     this.refreshStyleTab();
   }
 
+  /** Same shape as selectCosmetic, plus one extra step: an unlocked-but-never-equipped theme's
+   * art may not be in the texture manager yet, so this awaits ThemeLoader before actually
+   * switching the selection over — see loadTheme's own doc comment for why that fetch is lazy
+   * (per-theme, on first equip) rather than bundled into BootScene's default-theme preload. */
+  private async selectTheme(id: string) {
+    const option = THEME_OPTIONS.find((o) => o.id === id);
+    if (!option) {
+      return;
+    }
+
+    if (!this.cosmetics.isThemeUnlocked(id)) {
+      if (option.unlockFish <= 0 || !this.currency.spend(option.unlockFish)) {
+        this.showToast(`Not enough 🐟 — need ${option.unlockFish}, you have ${this.currency.balance}`);
+        return;
+      }
+      this.cosmetics.markThemePurchased(id);
+      this.vibrate([15, 25, 15]);
+    }
+
+    await loadTheme(this, id);
+    this.cosmetics.selectTheme(id);
+    this.refreshStyleTab();
+    // The hovering drop preview should reflect the newly equipped theme immediately, not just on
+    // the next drop.
+    this.updateDropPreview();
+  }
+
   /** Redraws every Style tab row against current unlock/purchase/selection state — shared by the
    * book's initial open and by selectCosmetic after a purchase or selection. */
   private refreshStyleTab() {
@@ -1665,6 +1764,22 @@ export class GameScene extends Phaser.Scene {
           : `🔒 Need ${option.unlockBigCats} 🐆 or 🐟 ${option.unlockFish}`;
       status?.setText(statusText);
     }
+    for (const option of THEME_OPTIONS) {
+      const unlocked = this.cosmetics.isThemeUnlocked(option.id);
+      const selected = this.cosmetics.getSelectedThemeId() === option.id;
+      const circle = this.styleTabContainer.getByName(
+        `style-theme-circle-${option.id}`,
+      ) as Phaser.GameObjects.Arc | null;
+      const name = this.styleTabContainer.getByName(`style-theme-name-${option.id}`) as Phaser.GameObjects.Text | null;
+      const status = this.styleTabContainer.getByName(
+        `style-theme-status-${option.id}`,
+      ) as Phaser.GameObjects.Text | null;
+      circle?.setAlpha(unlocked ? 1 : 0.3);
+      circle?.setStrokeStyle(selected ? 3 : 2, selected ? 0xffffff : 0xfdf6ec, selected ? 1 : 0.4);
+      name?.setAlpha(unlocked ? 1 : 0.4);
+      const statusText = selected ? 'Selected' : unlocked ? 'Tap to select' : `🔒 🐟 ${option.unlockFish}`;
+      status?.setText(statusText);
+    }
   }
 
   /**
@@ -1676,7 +1791,7 @@ export class GameScene extends Phaser.Scene {
   private showDiscoveryBanner(level: number) {
     const data = getCatData(level);
     this.showCelebrationBanner({
-      portraitTextureKey: textureKeyForLevel(level),
+      portraitTextureKey: textureKeyForLevel(level, this.cosmetics.getSelectedThemeId()),
       eyebrow: 'NEW CAT DISCOVERED!',
       title: data.name,
       accentColor: 0xffd873,
@@ -2663,7 +2778,9 @@ export class GameScene extends Phaser.Scene {
     // appearing — this is the one screen in the whole app where a cat's art is the actual point,
     // so it earns a proper entrance instead of a flat setVisible(true) like the rest of the overlay.
     const targetHeight = 190;
-    this.finalCatPortrait.setTexture(portraitTextureKeyForLevel(this.highestLevelThisRun));
+    this.finalCatPortrait.setTexture(
+      portraitTextureKeyForLevel(this.highestLevelThisRun, this.cosmetics.getSelectedThemeId()),
+    );
     const portraitScale = targetHeight / this.finalCatPortrait.height;
     this.finalCatPortrait.setScale(portraitScale * 0.4).setAlpha(0);
     this.finalCatGlow.setScale(0.4).setAlpha(0);

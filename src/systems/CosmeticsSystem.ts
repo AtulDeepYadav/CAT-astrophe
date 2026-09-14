@@ -1,5 +1,9 @@
+import { DEFAULT_THEME_ID } from '../config/catData';
+
 const SELECTION_KEY = 'cat-kingdom:cosmetic-selection';
 const PURCHASED_KEY = 'cat-kingdom:cosmetic-purchased';
+const THEME_SELECTION_KEY = 'cat-kingdom:theme-selection';
+const THEME_PURCHASED_KEY = 'cat-kingdom:theme-purchased';
 
 export interface CosmeticOption {
   id: string;
@@ -31,6 +35,25 @@ export const COSMETIC_OPTIONS: CosmeticOption[] = [
 
 const DEFAULT_ID = COSMETIC_OPTIONS[0].id;
 
+/** A full art-reskin (Robot/Pirate/8-bit, etc.) — a second, independent cosmetic axis alongside
+ * the golden-glow color above: owning a color implies nothing about which theme is equipped, or
+ * vice versa. Empty until real theme art exists to fill it in (see ThemeLoader's own doc comment
+ * for the loading side of this) — every player is effectively always on DEFAULT_THEME_ID until
+ * then, and the Style tab's theme row simply renders nothing to pick from yet. */
+export interface ThemeOption {
+  id: string;
+  name: string;
+  /** A cheap swatch stand-in shown in the Style tab row (an emoji, not a texture) — lets the row
+   * render before that theme's real art has been fetched, or for a theme with no thumbnail asset
+   * of its own at all. */
+  icon: string;
+  /** Fish price to unlock. Unlike cosmetic colors, themes have no free lifetime-stat unlock path —
+   * a pure Fish sink, at least until/unless that changes. */
+  unlockFish: number;
+}
+
+export const THEME_OPTIONS: ThemeOption[] = [];
+
 /**
  * Which golden-glow color the player has selected, persisted like the rest of the meta systems.
  * Free unlock state is derived from the Big Cats count at read time rather than stored (that
@@ -41,10 +64,14 @@ const DEFAULT_ID = COSMETIC_OPTIONS[0].id;
 export class CosmeticsSystem {
   private selectedId: string;
   private purchased: Set<string>;
+  private selectedThemeId: string;
+  private purchasedThemes: Set<string>;
 
   constructor() {
     this.selectedId = CosmeticsSystem.loadSelection();
     this.purchased = CosmeticsSystem.loadPurchased();
+    this.selectedThemeId = CosmeticsSystem.loadThemeSelection();
+    this.purchasedThemes = CosmeticsSystem.loadPurchasedThemes();
   }
 
   isUnlocked(id: string, bigCats: number): boolean {
@@ -110,6 +137,78 @@ export class CosmeticsSystem {
   private static loadPurchased(): Set<string> {
     try {
       const raw = localStorage.getItem(PURCHASED_KEY);
+      if (!raw) {
+        return new Set();
+      }
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? new Set(parsed.filter((id) => typeof id === 'string')) : new Set();
+    } catch {
+      return new Set();
+    }
+  }
+
+  // --- Theme axis (see ThemeOption's own doc comment) — same shape as the color methods above,
+  // just against THEME_OPTIONS/the theme-* localStorage keys instead. ---
+
+  /** DEFAULT_THEME_ID is always unlocked — every player starts here, and it's the one theme that
+   * never needs ThemeLoader to fetch anything (BootScene's own preload already covers it). */
+  isThemeUnlocked(id: string): boolean {
+    return id === DEFAULT_THEME_ID || this.purchasedThemes.has(id);
+  }
+
+  getSelectedThemeId(): string {
+    return this.selectedThemeId;
+  }
+
+  /** Selects a theme if unlocked. Returns true if the selection changed. Doesn't load anything —
+   * callers that need the art actually present (GameScene) should await ThemeLoader.loadTheme
+   * first; this just persists the choice. */
+  selectTheme(id: string): boolean {
+    if (id === this.selectedThemeId || !this.isThemeUnlocked(id)) {
+      return false;
+    }
+    this.selectedThemeId = id;
+    this.saveThemeSelection();
+    return true;
+  }
+
+  /** Marks a theme as purchased (idempotent) — same contract as markPurchased: the caller has
+   * already spent the Fish via CurrencySystem, this just remembers the outcome. */
+  markThemePurchased(id: string) {
+    if (this.purchasedThemes.has(id)) {
+      return;
+    }
+    this.purchasedThemes.add(id);
+    try {
+      localStorage.setItem(THEME_PURCHASED_KEY, JSON.stringify([...this.purchasedThemes]));
+    } catch {
+      // localStorage can be unavailable (private browsing, etc.) — purchase just won't persist.
+    }
+  }
+
+  private saveThemeSelection() {
+    try {
+      localStorage.setItem(THEME_SELECTION_KEY, this.selectedThemeId);
+    } catch {
+      // localStorage can be unavailable (private browsing, etc.) — selection just won't persist.
+    }
+  }
+
+  private static loadThemeSelection(): string {
+    try {
+      const raw = localStorage.getItem(THEME_SELECTION_KEY);
+      if (raw && (raw === DEFAULT_THEME_ID || THEME_OPTIONS.some((o) => o.id === raw))) {
+        return raw;
+      }
+      return DEFAULT_THEME_ID;
+    } catch {
+      return DEFAULT_THEME_ID;
+    }
+  }
+
+  private static loadPurchasedThemes(): Set<string> {
+    try {
+      const raw = localStorage.getItem(THEME_PURCHASED_KEY);
       if (!raw) {
         return new Set();
       }

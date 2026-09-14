@@ -124,13 +124,20 @@ export function pickWeightedSpawnLevel(overrideLevels?: number[], rng: () => num
   return SPAWNABLE_LEVELS[SPAWNABLE_LEVELS.length - 1]; // floating-point safety net
 }
 
-export function textureKeyForLevel(level: number): string {
-  return `cat-${level}`;
+/** The always-available, built-in art set — every texture-key function below defaults to this
+ * when no theme is given, so every pre-existing call site keeps compiling and resolving to
+ * exactly the same key it always has. CosmeticsSystem's selectedTheme also starts here, and it's
+ * the one theme id that never needs ThemeLoader (see systems/ThemeLoader.ts) to fetch anything —
+ * BootScene's own preload loop already covers it. */
+export const DEFAULT_THEME_ID = 'default';
+
+export function textureKeyForLevel(level: number, theme: string = DEFAULT_THEME_ID): string {
+  return theme === DEFAULT_THEME_ID ? `cat-${level}` : `cat-${level}-${theme}`;
 }
 
 /** Flat dark silhouette of the same sprite — shown in the Collection Book for undiscovered cats. */
-export function silhouetteTextureKeyForLevel(level: number): string {
-  return `cat-${level}-silhouette`;
+export function silhouetteTextureKeyForLevel(level: number, theme: string = DEFAULT_THEME_ID): string {
+  return theme === DEFAULT_THEME_ID ? `cat-${level}-silhouette` : `cat-${level}-${theme}-silhouette`;
 }
 
 /**
@@ -140,8 +147,8 @@ export function silhouetteTextureKeyForLevel(level: number): string {
  * up to the size the Menu and Game Over screens want. Used only where a cat is the whole point of
  * the screen, not during gameplay.
  */
-export function portraitTextureKeyForLevel(level: number): string {
-  return `cat-${level}-portrait`;
+export function portraitTextureKeyForLevel(level: number, theme: string = DEFAULT_THEME_ID): string {
+  return theme === DEFAULT_THEME_ID ? `cat-${level}-portrait` : `cat-${level}-${theme}-portrait`;
 }
 
 /** Soft radial-gradient texture generated once in BootScene, reused behind every Golden Cat. */

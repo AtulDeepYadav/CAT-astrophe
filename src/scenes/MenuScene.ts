@@ -9,6 +9,7 @@ import type { LeaderboardEntry } from '../systems/LeaderboardSystem';
 import { DailyChallengeSystem } from '../systems/DailyChallengeSystem';
 import { SettingsSystem } from '../systems/SettingsSystem';
 import { CollectionSystem } from '../systems/CollectionSystem';
+import { CosmeticsSystem } from '../systems/CosmeticsSystem';
 import { CurrencySystem } from '../systems/CurrencySystem';
 import { StreakSystem } from '../systems/StreakSystem';
 import { exportSaveData, importSaveData } from '../systems/saveBackup';
@@ -389,6 +390,7 @@ export class MenuScene extends Phaser.Scene {
     const collection = new CollectionSystem();
     const heroLevel = collection.highestDiscoveredLevel();
     const heroData = getCatData(heroLevel);
+    const heroTheme = new CosmeticsSystem().getSelectedThemeId();
     const centerX = GAME_WIDTH / 2;
     const centerY = 630;
     const targetHeight = 190;
@@ -397,7 +399,7 @@ export class MenuScene extends Phaser.Scene {
     // way the wash does for the button column above, so the showcase reads as one designed unit.
     createPanel(this, centerX, centerY, 260, 250, { radius: 32, fill: 0xfff6e8, fillAlpha: 0.16, depth: 0 });
 
-    const portrait = this.add.image(centerX, centerY, portraitTextureKeyForLevel(heroLevel));
+    const portrait = this.add.image(centerX, centerY, portraitTextureKeyForLevel(heroLevel, heroTheme));
     const scale = targetHeight / portrait.height;
     portrait.setScale(scale * 0.5).setAlpha(0);
     portrait.setDepth(1);

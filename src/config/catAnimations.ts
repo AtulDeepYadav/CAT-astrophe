@@ -1,3 +1,5 @@
+import { DEFAULT_THEME_ID } from './catData';
+
 /**
  * Frame-swap animations for cat levels that have real hand-drawn pose art (see
  * public/assets/sprites/cats/anim/). Every frame for a given level MUST share the exact same
@@ -35,8 +37,8 @@ export function framesForLevel(level: number): AnimFrame[] {
   return FRAMES_BY_LEVEL[level] ?? [];
 }
 
-export function animFrameTextureKey(level: number, frame: AnimFrame): string {
-  return `cat-${level}-anim-${frame}`;
+export function animFrameTextureKey(level: number, frame: AnimFrame, theme: string = DEFAULT_THEME_ID): string {
+  return theme === DEFAULT_THEME_ID ? `cat-${level}-anim-${frame}` : `cat-${level}-${theme}-anim-${frame}`;
 }
 
 interface IdleLoopStep {

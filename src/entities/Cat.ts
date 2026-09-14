@@ -1,5 +1,11 @@
 import Phaser from 'phaser';
-import { GOLDEN_GLOW_TEXTURE, getCatData, textureKeyForLevel, widthCorrectionForLevel } from '../config/catData';
+import {
+  DEFAULT_THEME_ID,
+  GOLDEN_GLOW_TEXTURE,
+  getCatData,
+  textureKeyForLevel,
+  widthCorrectionForLevel,
+} from '../config/catData';
 import type { AnimFrame } from '../config/catAnimations';
 import { animFrameTextureKey, hasAnimationFrames, idleLoopForLevel, idleLoopTotalMs } from '../config/catAnimations';
 
@@ -28,6 +34,10 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
   public readonly level: number;
   public readonly radius: number;
   public readonly isGolden: boolean;
+  /** Which cosmetic reskin this cat was spawned with — readable (not private) so MergeSystem can
+   * carry it forward onto the cat a merge produces, rather than every merged cat silently
+   * reverting to the default art regardless of what the board around it looks like. */
+  public readonly theme: string;
 
   public restTimeMs = 0;
   public nextIdleAt = 0;
@@ -52,12 +62,13 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
     level: number,
     isGolden = false,
     goldenTint = GOLDEN_TINT,
+    theme: string = DEFAULT_THEME_ID,
   ) {
     const data = getCatData(level);
     // The circle body is created here via the `shape` option, in the same call that sets
     // restitution/friction/label — calling `setCircle()` again afterward would silently
     // replace this body with a default-physics one and lose all of those options.
-    super(world, x, y, textureKeyForLevel(level), undefined, {
+    super(world, x, y, textureKeyForLevel(level, theme), undefined, {
       shape: { type: 'circle', radius: data.radius },
       restitution: 0.35,
       friction: 0.05,
@@ -68,6 +79,7 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
     this.level = level;
     this.radius = data.radius;
     this.isGolden = isGolden;
+    this.theme = theme;
     this.animated = hasAnimationFrames(level);
     this.scene.add.existing(this);
 
@@ -188,7 +200,7 @@ export class Cat extends Phaser.Physics.Matter.Sprite {
       return;
     }
     this.animFrame = frame;
-    this.setTexture(animFrameTextureKey(this.level, frame));
+    this.setTexture(animFrameTextureKey(this.level, frame, this.theme));
   }
 
   /**

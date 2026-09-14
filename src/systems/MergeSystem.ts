@@ -74,7 +74,10 @@ export function registerMergeSystem(
       catA.destroy();
       catB.destroy();
 
-      const merged = new Cat(world, midX, midY, newLevel);
+      // Carries the pair's theme forward onto the merged result (both should already share one —
+      // they only got to be on the board together via the same equipped-theme drops) rather than
+      // silently reverting to the default art the instant two cats merge.
+      const merged = new Cat(world, midX, midY, newLevel, false, undefined, catA.theme);
       merged.setVelocity(0, -1.5); // small pop so the merge reads as an event, not a swap
       merged.playBirthBounce();
 
