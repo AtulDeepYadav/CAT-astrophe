@@ -35,6 +35,26 @@ being given up, not free wins — worth knowing if monetization is ever dropped 
 - [x] All three ad placements plus RevenueCat use Google's/RevenueCat's placeholder test IDs for
       now — see the `TODO` comment at the top of `MonetizationSystem.ts` for exactly what to swap
       and where those come from (now includes `TEST_BANNER_AD_UNIT_ANDROID` too).
+- [x] App icon and splash screen regenerated from the game's real art (`public/icons/icon-512.png`)
+      via `@capacitor/assets` — Capacitor's generic default launcher icon/splash is gone. Adaptive
+      icon (foreground/background layers, safe-zone checked so nothing clips in the round/squircle
+      mask), legacy + round launcher icons, and light/dark splash screens for every density, all
+      generated in one pass:
+      ```bash
+      mkdir assets && cp public/icons/icon-512.png assets/logo.png
+      npx capacitor-assets generate --android \
+        --iconBackgroundColor '#ffc93c' --iconBackgroundColorDark '#ffc93c' \
+        --splashBackgroundColor '#2b2018' --splashBackgroundColorDark '#2b2018'
+      ```
+      (`#ffc93c` is sampled from the icon's own background so the adaptive-icon safe-zone padding
+      is seamless; `#2b2018` is the app's actual splash/window background from
+      `capacitor.config.ts`.) The three now-orphaned default vector-icon files
+      `npx cap add android` left behind (`drawable/ic_launcher_background.xml`,
+      `drawable-v24/ic_launcher_foreground.xml`, `values/ic_launcher_background.xml`) were removed
+      — nothing referenced them once `mipmap-anydpi-v26/ic_launcher.xml` pointed at the new
+      `@mipmap/ic_launcher_background`/`_foreground` PNGs instead. `assets/logo.png` is kept in the
+      repo as the source, standard practice for this tool — regenerate any time with a new source
+      image the same way.
 
 ## What's left — steps only you can run
 
@@ -62,26 +82,13 @@ this can earn real money:
   `android/app/src/main/AndroidManifest.xml` (a `<meta-data>` tag AdMob's own setup docs specify —
   Android will crash on launch without it once you're off test ads).
 - **RevenueCat** (https://app.revenuecat.com) — free up to $2.5k/mo tracked revenue. Create a
-  project, connect it to a Play Console app (step 4 below has to exist first), create a
+  project, connect it to a Play Console app (step 3 below has to exist first), create a
   `remove_ads` entitlement attached to a one-time non-consumable product, and put the project's
   public Android SDK key into `REVENUECAT_API_KEY_ANDROID` in `MonetizationSystem.ts`.
 - Also create the actual one-time product for Remove Ads inside **Play Console** → Monetize → In-app
-  products, once you have that account (step 4).
+  products, once you have that account (step 3).
 
-### 3. Regenerate the app icon and splash screen
-
-`npx cap add android` filled in Capacitor's own placeholder launcher icon/splash — not this game's
-actual art. Run:
-
-```bash
-npm install -D @capacitor/assets
-npx capacitor-assets generate --android
-```
-
-pointed at a real 1024×1024 icon and a splash image (the existing `public/icons/icon-512.png` is
-a reasonable source for the icon if nothing higher-res exists).
-
-### 4. Google Play Console account (needs your own Google account + $25 one-time fee)
+### 3. Google Play Console account (needs your own Google account + $25 one-time fee)
 
 1. Go to https://play.google.com/console/signup and pay the one-time registration fee.
 2. Create a new app, fill in the store listing (title, short/full description, screenshots — at
@@ -95,9 +102,9 @@ a reasonable source for the icon if nothing higher-res exists).
    it create a new keystore the first time. **Back this file up somewhere durable outside this
    repo** (password manager, encrypted drive) — if it's lost, you can never update this app
    listing again under the same package ID, ever. Never commit the keystore or its password to git.
-5. Upload the resulting `.aab` under Internal Testing first (see step 5), not Production.
+5. Upload the resulting `.aab` under Internal Testing first (see step 4), not Production.
 
-### 5. Real-device testing
+### 4. Real-device testing
 
 Play Console's **Internal Testing** track skips full review and lets you install the build on
 your own phone (or a few testers' phones) within minutes via a private opt-in link.
@@ -114,9 +121,8 @@ completing a sandbox Remove Ads purchase — before promoting anything to Produc
 
 1. Install Android Studio, open `android/`, let Gradle sync (Step 1).
 2. Create AdMob + RevenueCat accounts and swap in real IDs (Step 2).
-3. Regenerate icons/splash from real art (Step 3).
-4. Create the Play Console account, update the Data Safety form and privacy policy, generate a
-   signed bundle, and back up the keystore (Step 4).
-5. Upload to Internal Testing and play a full round — including the ad and purchase flows — on a
-   real phone (Step 5).
-6. Only then promote to Production.
+3. Create the Play Console account, update the Data Safety form and privacy policy, generate a
+   signed bundle, and back up the keystore (Step 3).
+4. Upload to Internal Testing and play a full round — including the ad and purchase flows — on a
+   real phone (Step 4).
+5. Only then promote to Production.
